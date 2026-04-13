@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="theme-color" content="#0F172A"/>
+<title>Iron Log</title>
+<link rel="manifest" href="data:application/json;base64,eyJuYW1lIjoiSXJvbiBMb2ciLCJzaG9ydF9uYW1lIjoiSXJvbkxvZyIsInN0YXJ0X3VybCI6Ii4iLCJkaXNwbGF5Ijoic3RhbmRhbG9uZSIsImJhY2tncm91bmRfY29sb3IiOiIjMEYxNzJBIiwidGhlbWVfY29sb3IiOiIjMEYxNzJBIn0="/>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{background:#0F172A;color:#F8FAFC;font-family:'Outfit',sans-serif;max-width:480px;margin:0 auto;min-height:100vh;min-height:100dvh;overflow-x:hidden}
+input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none}
+input[type=number]{-moz-appearance:textfield}
+::-webkit-scrollbar{height:4px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:#334155;border-radius:4px}
+
+.toast{position:fixed;top:env(safe-area-inset-top,16px);left:50%;transform:translateX(-50%);background:#10B981;color:#fff;padding:10px 24px;border-radius:20px;font-size:14px;font-weight:600;z-index:999;box-shadow:0 4px 20px rgba(16,185,129,.4);animation:fadeIn .3s ease}
+@keyframes fadeIn{from{opacity:0;transform:translateX(-50%) translateY(-10px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
+
+.header{padding:max(env(safe-area-inset-top,20px),20px) 20px 12px;display:flex;justify-content:space-between;align-items:flex-start}
+.logo{font-size:26px;font-family:'JetBrains Mono',monospace;font-weight:700;letter-spacing:5px}
+.sub-row{display:flex;align-items:center;gap:6px;margin-top:2px}
+.sub{font-size:11px;color:#64748B;letter-spacing:2px;text-transform:uppercase}
+.status-dot{width:7px;height:7px;border-radius:50%;transition:background .3s}
+.status-text{font-size:10px;font-family:monospace;font-weight:600;transition:color .3s}
+
+.menu-btn{background:none;border:none;color:#94A3B8;font-size:24px;cursor:pointer;padding:8px}
+.menu{background:#1E293B;border-radius:10px;margin:8px 20px 0;overflow:hidden;border:1px solid #334155}
+.menu button{display:block;width:100%;background:none;border:none;border-bottom:1px solid #334155;color:#F8FAFC;padding:13px 16px;font-size:14px;text-align:left;cursor:pointer;font-family:'Outfit',sans-serif}
+.menu button:last-child{border-bottom:none}
+.menu button:active{background:#334155}
+.menu .danger{color:#EF4444}
+
+.week-bar{display:flex;gap:6px;padding:4px 16px 10px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.wk{background:#1E293B;border:none;color:#94A3B8;padding:6px 14px;border-radius:8px;font-size:13px;font-weight:600;font-family:'JetBrains Mono',monospace;cursor:pointer;flex-shrink:0;transition:all .15s}
+.wk.active{background:#F8FAFC;color:#0F172A}
+.wk-add{background:transparent;border:1px dashed #334155;color:#64748B;padding:6px 14px;border-radius:8px;font-size:16px;cursor:pointer;flex-shrink:0}
+
+.day-tabs{display:flex;border-bottom:1px solid #1E293B;padding:0 16px}
+.day-tab{flex:1;background:none;border:none;padding:11px 2px;font-size:12px;font-family:'Outfit',sans-serif;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px;border-bottom:3px solid transparent;transition:all .15s}
+
+.day-hdr{margin:14px 16px 0;padding:9px 14px;background:#1E293B;border-radius:0 8px 8px 0;display:flex;justify-content:space-between;align-items:center}
+.day-title{font-weight:700;font-size:15px;letter-spacing:1px}
+.done-badge{background:#10B981;color:#fff;font-size:11px;font-weight:700;padding:3px 10px;border-radius:8px}
+
+.view-tog{display:flex;margin:10px 16px;border:1px solid #1E293B;border-radius:9px;overflow:hidden}
+.view-btn{flex:1;background:transparent;border:none;color:#64748B;padding:8px;font-size:13px;font-weight:600;font-family:'Outfit',sans-serif;cursor:pointer;border-radius:7px;transition:all .15s}
+.view-btn.active{background:#1E293B;color:#F8FAFC}
+
+.list{padding:6px 16px 16px;display:flex;flex-direction:column;gap:9px}
+.card{background:#1E293B;border-radius:11px;padding:13px 15px}
+.ex-hdr{display:flex;align-items:center;gap:8px;margin-bottom:11px}
+.ex-num{font-family:'JetBrains Mono',monospace;font-size:10px;color:#475569;font-weight:600}
+.ex-name{font-size:14px;font-weight:600;flex:1}
+.prev-w{font-size:10px;color:#64748B;font-family:'JetBrains Mono',monospace}
+
+.input-row{display:flex;gap:10px}
+.input-grp{flex:1;text-align:center}
+.input-lbl{font-size:9px;font-weight:700;color:#475569;letter-spacing:2px;font-family:'JetBrains Mono',monospace;margin-bottom:3px}
+.input-field{width:100%;background:#0F172A;border:none;border-radius:6px;color:#F8FAFC;font-size:18px;font-weight:600;font-family:'JetBrains Mono',monospace;padding:8px 4px;text-align:center;outline:none}
+.input-field:focus{box-shadow:0 0 0 1px rgba(255,255,255,.15)}
+
+.complete-btn{width:100%;border:none;color:#fff;padding:14px;border-radius:11px;font-size:15px;font-weight:700;font-family:'Outfit',sans-serif;letter-spacing:1px;cursor:pointer;margin-top:8px;text-transform:uppercase;transition:opacity .15s}
+.complete-btn:active{opacity:.8}
+
+.bar-chart{display:flex;align-items:flex-end;gap:7px;margin-top:10px;padding:6px 0;overflow-x:auto}
+.bar-col{display:flex;flex-direction:column;align-items:center;gap:3px;min-width:28px}
+.bar-val{font-size:9px;font-family:'JetBrains Mono',monospace;color:#94A3B8}
+.bar-lbl{font-size:9px;font-family:'JetBrains Mono',monospace;color:#475569}
+.pr-badge{font-size:11px;font-weight:700;padding:2px 9px;border-radius:8px;font-family:'JetBrains Mono',monospace}
+.last-info{font-size:10px;color:#64748B;margin-top:5px;font-family:monospace}
+
+.footer{text-align:center;padding:28px 16px 40px;color:#1E293B;font-size:11px;font-family:'JetBrains Mono',monospace;letter-spacing:3px;text-transform:uppercase}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script>
+const e=React.createElement,{useState,useEffect,useRef,useCallback}=React;
+
+const DAYS=[
+{id:"d1",label:"D1",title:"Push + Quads",color:"#3B82F6",cl:"#DBEAFE",emoji:"🔵",
+ex:["Incline Press","Pec Fly","Shoulder Press Machine","Lateral Raises","Leg Extension","Tricep Pushdown","Abs Crunch","Forearm (جوا وبرا)"]},
+{id:"d2",label:"D2",title:"Pull + Hamstrings",color:"#10B981",cl:"#D1FAE5",emoji:"🟢",
+ex:["T-Bar Row","Lat Pulldown (Close Grip)","Leg Curl","Hip Thrust","Reverse Delts","Barbell Curl","Pull-ups"]},
+{id:"d3",label:"D3",title:"Push + Lower",color:"#8B5CF6",cl:"#EDE9FE",emoji:"🟣",
+ex:["Squat","Incline Press","Chest Press","Shoulder Press Machine","Lateral Raises","EZ Overhead Triceps","Abs"]},
+{id:"d4",label:"D4",title:"Pull + Posterior",color:"#EF4444",cl:"#FEE2E2",emoji:"🔴",
+ex:["Lat Pulldown (Wide Grip)","Mid-Lat Row","RDL Machine","Reverse Delts","Preacher Curl","Hammer Curl","Calves (Jeff Method)","Pull-ups"]}
+];
+
+const KEY="ironlog_data";
+const load=()=>{try{return JSON.parse(localStorage.getItem(KEY))||{}}catch{return{}}};
+const save=(d)=>{try{localStorage.setItem(KEY,JSON.stringify(d));return true}catch{return false}};
+
+function App(){
+const[data,setData]=useState(load);
+const[di,setDi]=useState(0);
+const[week,setWeek]=useState(()=>{const w=Object.keys(load()).map(Number).filter(n=>!isNaN(n)).sort((a,b)=>b-a);return w[0]||1});
+const[view,setView]=useState("log");
+const[toast,setToast]=useState(null);
+const[menu,setMenu]=useState(false);
+const[status,setStatus]=useState("idle");
+const ref=useRef(data);
+
+const flash=(m)=>{setToast(m);setTimeout(()=>setToast(null),2500)};
+
+const persist=(nd)=>{
+  const c=JSON.parse(JSON.stringify(nd));
+  ref.current=c;setData(c);
+  setStatus("saving");
+  setTimeout(()=>{
+    const ok=save(c);
+    setStatus(ok?"saved":"error");
+    if(!ok)flash("⚠ Save failed");
+    setTimeout(()=>setStatus("idle"),1500);
+  },200);
+};
+
+const d=DAYS[di];
+const allW=Object.keys(data).map(Number).filter(n=>!isNaN(n)).sort((a,b)=>a-b);
+if(!allW.length)allW.push(1);
+
+const entry=(w,did,ex)=>data?.[w]?.[did]?.[ex]||{weight:"",reps:"",sets:""};
+
+const handleInput=(ex,field,val)=>{
+  const u=JSON.parse(JSON.stringify(ref.current));
+  if(!u[week])u[week]={};if(!u[week][d.id])u[week][d.id]={};
+  const p=u[week][d.id][ex]||{weight:"",reps:"",sets:""};
+  u[week][d.id][ex]={...p,[field]:val};
+  persist(u);
+};
+
+const complete=()=>{
+  const u=JSON.parse(JSON.stringify(ref.current));
+  if(!u[week])u[week]={};if(!u[week][d.id])u[week][d.id]={};
+  u[week][d.id]._done=new Date().toISOString();
+  persist(u);flash("Workout logged! 💪");
+};
+
+const addWeek=()=>{
+  const ws=Object.keys(ref.current).map(Number).filter(n=>!isNaN(n));
+  const nx=ws.length?Math.max(...ws)+1:1;
+  const u=JSON.parse(JSON.stringify(ref.current));
+  u[nx]={};persist(u);setWeek(nx);flash("Week "+nx+" started");
+};
+
+const prevWeight=(ex)=>{
+  for(const w of[...allW].reverse()){if(w>=week)continue;if(data?.[w]?.[d.id]?.[ex]?.weight)return data[w][d.id][ex].weight}return null;
+};
+
+const stats=(ex)=>allW.filter(w=>data[w]?.[d.id]?.[ex]?.weight).map(w=>({w,wt:+data[w][d.id][ex].weight||0,r:+data[w][d.id][ex].reps||0,s:+data[w][d.id][ex].sets||0}));
+
+const exportData=()=>{
+  const b=new Blob([JSON.stringify(ref.current,null,2)],{type:"application/json"});
+  const a=document.createElement("a");a.href=URL.createObjectURL(b);a.download="ironlog_backup.json";a.click();
+  flash("Exported ✓");setMenu(false);
+};
+
+const importData=()=>{
+  const inp=document.createElement("input");inp.type="file";inp.accept=".json";
+  inp.onchange=(ev)=>{const f=ev.target.files[0];if(!f)return;const r=new FileReader();
+    r.onload=(e)=>{try{const p=JSON.parse(e.target.result);persist(p);const ws=Object.keys(p).map(Number).filter(n=>!isNaN(n)).sort((a,b)=>b-a);if(ws.length)setWeek(ws[0]);flash("Imported ✓")}catch{flash("Invalid file")}};
+    r.readAsText(f)};inp.click();setMenu(false);
+};
+
+const resetAll=()=>{if(!confirm("Delete ALL data?"))return;localStorage.removeItem(KEY);setData({});ref.current={};setWeek(1);flash("Cleared");setMenu(false)};
+
+const sc=status==="saving"?"#FBBF24":status==="saved"?"#10B981":status==="error"?"#EF4444":"#334155";
+
+return e("div",null,
+  // Toast
+  toast&&e("div",{className:"toast"},toast),
+
+  // Header
+  e("div",{className:"header"},
+    e("div",null,
+      e("h1",{className:"logo"},"IRON LOG"),
+      e("div",{className:"sub-row"},
+        e("span",{className:"sub"},"Tracker"),
+        e("div",{className:"status-dot",style:{background:sc}}),
+        status!=="idle"&&e("span",{className:"status-text",style:{color:sc}},status==="saving"?"saving…":status==="saved"?"saved ✓":"failed!")
+      )
+    ),
+    e("button",{className:"menu-btn",onClick:()=>setMenu(!menu)},"⋮")
+  ),
+
+  // Menu
+  menu&&e("div",{className:"menu"},
+    e("button",{onClick:exportData},"📤 Export Data"),
+    e("button",{onClick:importData},"📥 Import Data"),
+    e("button",{className:"danger",onClick:resetAll},"🗑 Reset All")
+  ),
+
+  // Weeks
+  e("div",{className:"week-bar"},
+    ...allW.map(w=>e("button",{key:w,className:"wk"+(week===w?" active":""),onClick:()=>setWeek(w)},"W"+w)),
+    e("button",{className:"wk-add",onClick:addWeek},"+")
+  ),
+
+  // Day tabs
+  e("div",{className:"day-tabs"},
+    ...DAYS.map((dd,i)=>e("button",{key:dd.id,className:"day-tab",style:{borderBottomColor:di===i?dd.color:"transparent",color:di===i?dd.color:"#64748B",fontWeight:di===i?700:400},onClick:()=>setDi(i)},
+      e("span",{style:{fontSize:9}},dd.emoji),
+      e("span",null,dd.label)
+    ))
+  ),
+
+  // Day header
+  e("div",{className:"day-hdr",style:{borderLeft:"4px solid "+d.color}},
+    e("span",{className:"day-title",style:{color:d.color}},d.title),
+    data?.[week]?.[d.id]?._done&&e("span",{className:"done-badge"},"✓ Done")
+  ),
+
+  // View toggle
+  e("div",{className:"view-tog"},
+    ["log","progress"].map(v=>e("button",{key:v,className:"view-btn"+(view===v?" active":""),onClick:()=>setView(v)},v[0].toUpperCase()+v.slice(1)))
+  ),
+
+  // Content
+  view==="log"?
+    e("div",{className:"list"},
+      ...d.ex.map((ex,i)=>{
+        const en=entry(week,d.id,ex);const pw=prevWeight(ex);
+        return e("div",{key:ex,className:"card"},
+          e("div",{className:"ex-hdr"},
+            e("span",{className:"ex-num"},String(i+1).padStart(2,"0")),
+            e("span",{className:"ex-name"},ex),
+            pw&&e("span",{className:"prev-w"},"prev "+pw+"kg")
+          ),
+          e("div",{className:"input-row"},
+            ["weight","reps","sets"].map(f=>
+              e("div",{key:f,className:"input-grp"},
+                e("div",{className:"input-lbl"},f==="weight"?"KG":f.toUpperCase()),
+                e("input",{type:"number",inputMode:"decimal",className:"input-field",value:en[f],placeholder:"—",
+                  style:{borderBottom:"2px solid "+d.color+"30"},
+                  onChange:ev=>handleInput(ex,f,ev.target.value)})
+              )
+            )
+          )
+        )
+      }),
+      e("button",{className:"complete-btn",style:{background:d.color},onClick:complete},"COMPLETE WORKOUT")
+    )
+  :
+    e("div",{className:"list"},
+      ...d.ex.map(ex=>{
+        const s=stats(ex);
+        if(!s.length)return e("div",{key:ex,className:"card"},e("span",{className:"ex-name"},ex),e("p",{style:{color:"#64748B",fontSize:12,marginTop:6}},"No data yet"));
+        const mx=Math.max(...s.map(x=>x.wt));
+        return e("div",{key:ex,className:"card"},
+          e("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center"}},
+            e("span",{className:"ex-name"},ex),
+            e("span",{className:"pr-badge",style:{background:d.cl,color:d.color}},"PR "+mx+"kg")
+          ),
+          e("div",{className:"bar-chart"},
+            ...s.map((x,i)=>{
+              const h=mx>0?(x.wt/mx)*55:0;
+              return e("div",{key:i,className:"bar-col"},
+                e("span",{className:"bar-val"},x.wt),
+                e("div",{style:{width:20,height:h,background:"linear-gradient(180deg,"+d.color+","+d.color+"77)",borderRadius:"3px 3px 0 0"}}),
+                e("span",{className:"bar-lbl"},"W"+x.w)
+              )
+            })
+          ),
+          e("div",{className:"last-info"},"Last: "+s[s.length-1].wt+"kg × "+s[s.length-1].r+"r × "+s[s.length-1].s+"s")
+        )
+      })
+    ),
+
+  e("div",{className:"footer"},"TRACK · LIFT · GROW")
+);
+}
+
+ReactDOM.createRoot(document.getElementById("app")).render(e(App));
+</script>
+</body>
+</html>
