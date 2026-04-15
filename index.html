@@ -340,19 +340,37 @@ h("button",{className:"btn "+(danger?"btn-danger":"btn-primary"),onClick:onConfi
 }
 
 /* ─── AUTH SCREEN ─── */
+const LAST_USER_KEY="ironlog_last_user";
+
 function AuthScreen({onLogin}){
-const[mode,setMode]=S("select"); // select, login, register
+// modes: "quick" (last user PIN), "signin" (name + PIN), "register" (new user)
 const[users,setUsrs]=S(getUsers());
-const[selected,setSel]=S(null);
+const[lastUser,setLastUser]=S(null);
+const[mode,setMode]=S("loading");
 const[name,setName]=S("");
 const[pin,setPin]=S("");
 const[error,setError]=S("");
-const[loading,setLoading]=S(true);
 
-// Load users from Firestore on mount
+// Load users from Firestore on mount and decide initial mode
 E(()=>{
-loadUsersFromFirestore().then(u=>{setUsrs(u);setLoading(false)}).catch(()=>setLoading(false));
+loadUsersFromFirestore().then(u=>{
+setUsrs(u);
+// Check for last signed-in user on this device
+let lastId=null;
+try{lastId=localStorage.getItem(LAST_USER_KEY)}catch{}
+const last=lastId?u.find(x=>x.id===lastId):null;
+if(last){setLastUser(last);setMode("quick")}
+else if(u.length===0){setMode("register")}
+else{setMode("signin")}
+}).catch(()=>{
+if(users.length===0)setMode("register");else setMode("signin");
+});
 },[]);
+
+const rememberUser=(u)=>{
+try{localStorage.setItem(LAST_USER_KEY,u.id)}catch{}
+onLogin(u);
+};
 
 const handleKey=(k)=>{
 if(k==="del"){setPin(p=>p.slice(0,-1));setError("");return}
@@ -363,22 +381,35 @@ if(np.length===4){
 setTimeout(()=>{
 if(mode==="register"){
 if(!name.trim()){setError("Enter a name first");setPin("");return}
+// Check if name already taken
+const existing=users.find(x=>x.name.toLowerCase()===name.trim().toLowerCase());
+if(existing){setError("Name taken — try signing in instead");setPin("");return}
 const u={id:uid(),name:name.trim(),pin:hashPin(np),color:COLORS[users.length%COLORS.length],created:new Date().toISOString()};
 const nu=[...users,u];setUsers(nu);setUsrs(nu);
 const db=getDB(u.id);
 if(!db.plans){db.plans=DEFAULT_PLANS;db.logs={};db.bodyweight=[];db.settings={unit:"kg"};setDB(u.id,db)}
-onLogin(u);
-}else{
-const u=users.find(x=>x.id===selected);
-if(!u){setError("Select a profile");setPin("");return}
+rememberUser(u);
+}else if(mode==="signin"){
+if(!name.trim()){setError("Enter your name");setPin("");return}
+const u=users.find(x=>x.name.toLowerCase()===name.trim().toLowerCase());
+if(!u){setError("No account with that name");setPin("");return}
 if(hashPin(np)!==u.pin){setError("Wrong PIN");setPin("");return}
-onLogin(u);
+rememberUser(u);
+}else if(mode==="quick"){
+if(hashPin(np)!==lastUser.pin){setError("Wrong PIN");setPin("");return}
+rememberUser(lastUser);
 }
 },200);
 }
 };
 
-if(loading){
+const forgetDevice=()=>{
+try{localStorage.removeItem(LAST_USER_KEY)}catch{}
+setLastUser(null);setPin("");setError("");
+setMode(users.length===0?"register":"signin");
+};
+
+if(mode==="loading"){
 return h("div",{className:"auth-screen"},
 h("div",{className:"auth-logo"},"IRON LOG"),
 h("div",{className:"auth-sub"},"Loading..."),
@@ -386,24 +417,69 @@ h("div",{style:{marginTop:20,color:"var(--tx3)",fontSize:14}},"Syncing with clou
 );
 }
 
-if(mode==="select"&&users.length===0){
+// Quick sign-in for returning user on this device
+if(mode==="quick"&&lastUser){
 return h("div",{className:"auth-screen"},
-h("div",{className:"auth-logo"},"IRON LOG"),
-h("div",{className:"auth-sub"},"Workout Tracker"),
-h("div",{style:{marginTop:20,marginBottom:20,color:"var(--tx3)",fontSize:14}},"Create your profile to get started"),
-h("button",{className:"btn btn-primary",style:{maxWidth:280},onClick:()=>setMode("register")},"Create Profile")
+h("div",{className:"auth-logo",style:{fontSize:28}},"IRON LOG"),
+h("div",{className:"auth-sub",style:{marginBottom:20}},"Welcome Back"),
+h("div",{className:"auth-form"},
+h("div",{style:{textAlign:"center",marginBottom:16}},
+h("div",{className:"profile-avatar",style:{background:lastUser.color,width:64,height:64,fontSize:28,margin:"0 auto 10px",borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff"}},
+lastUser.name[0].toUpperCase()),
+h("div",{style:{fontWeight:700,fontSize:18}},lastUser.name),
+h("div",{style:{fontSize:12,color:"var(--tx3)",marginTop:2}},"Enter your PIN")
+),
+h("div",{className:"pin-dots"},
+[0,1,2,3].map(i=>h("div",{key:i,className:"pin-dot"+(i<pin.length?" filled":"")}))),
+error&&h("div",{style:{color:"var(--red)",fontSize:13,textAlign:"center",marginBottom:8}},error),
+h("div",{className:"pin-pad"},
+[1,2,3,4,5,6,7,8,9].map(n=>h("button",{key:n,className:"pin-key",onClick:()=>handleKey(String(n))},n)),
+h("button",{className:"pin-key pin-key-action",onClick:forgetDevice,title:"Not you?"},"Not me"),
+h("button",{className:"pin-key",onClick:()=>handleKey("0")},"0"),
+h("button",{className:"pin-key pin-key-action",onClick:()=>handleKey("del")},"Del")
+)
+)
 );
 }
 
-if(mode==="register"){
+// Sign in with name + PIN
+if(mode==="signin"){
 return h("div",{className:"auth-screen"},
 h("div",{className:"auth-logo",style:{fontSize:28}},"IRON LOG"),
-h("div",{className:"auth-sub",style:{marginBottom:24}},"New Profile"),
+h("div",{className:"auth-sub",style:{marginBottom:20}},"Sign In"),
 h("div",{className:"auth-form"},
 h("div",{className:"field"},
 h("div",{className:"field-label"},"Your Name"),
 h("input",{className:"field-input",placeholder:"Enter your name",value:name,
-onChange:e=>setName(e.target.value),autoFocus:true})
+onChange:e=>{setName(e.target.value);setError("")},autoFocus:true})
+),
+h("div",{className:"field-label",style:{textAlign:"center",marginBottom:8}},"Enter Your PIN"),
+h("div",{className:"pin-dots"},
+[0,1,2,3].map(i=>h("div",{key:i,className:"pin-dot"+(i<pin.length?" filled":"")}))),
+error&&h("div",{style:{color:"var(--red)",fontSize:13,textAlign:"center",marginBottom:8}},error),
+h("div",{className:"pin-pad"},
+[1,2,3,4,5,6,7,8,9].map(n=>h("button",{key:n,className:"pin-key",onClick:()=>handleKey(String(n))},n)),
+h("button",{className:"pin-key pin-key-action",onClick:()=>{setPin("");setError("")}},"Clear"),
+h("button",{className:"pin-key",onClick:()=>handleKey("0")},"0"),
+h("button",{className:"pin-key pin-key-action",onClick:()=>handleKey("del")},"Del")
+),
+h("div",{className:"auth-switch"},
+"New here? ",
+h("button",{onClick:()=>{setMode("register");setPin("");setName("");setError("")}},"Create Profile")
+)
+)
+);
+}
+
+// Register (create new profile)
+return h("div",{className:"auth-screen"},
+h("div",{className:"auth-logo",style:{fontSize:28}},"IRON LOG"),
+h("div",{className:"auth-sub",style:{marginBottom:24}},"Create Profile"),
+h("div",{className:"auth-form"},
+h("div",{className:"field"},
+h("div",{className:"field-label"},"Your Name"),
+h("input",{className:"field-input",placeholder:"Enter your name",value:name,
+onChange:e=>{setName(e.target.value);setError("")},autoFocus:true})
 ),
 h("div",{className:"field-label",style:{textAlign:"center",marginBottom:8}},"Set a 4-digit PIN"),
 h("div",{className:"pin-dots"},
@@ -411,41 +487,13 @@ h("div",{className:"pin-dots"},
 error&&h("div",{style:{color:"var(--red)",fontSize:13,textAlign:"center",marginBottom:8}},error),
 h("div",{className:"pin-pad"},
 [1,2,3,4,5,6,7,8,9].map(n=>h("button",{key:n,className:"pin-key",onClick:()=>handleKey(String(n))},n)),
-h("button",{className:"pin-key pin-key-action",onClick:()=>{setMode(users.length?"select":"select");setPin("");setName("");setError("")}},"Back"),
+h("button",{className:"pin-key pin-key-action",onClick:()=>{setPin("");setError("")}},"Clear"),
 h("button",{className:"pin-key",onClick:()=>handleKey("0")},"0"),
 h("button",{className:"pin-key pin-key-action",onClick:()=>handleKey("del")},"Del")
-)
-));
-}
-
-return h("div",{className:"auth-screen"},
-h("div",{className:"auth-logo",style:{fontSize:28}},"IRON LOG"),
-h("div",{className:"auth-sub",style:{marginBottom:20}},mode==="login"?"Enter PIN":"Select Profile"),
-
-mode==="select"?h("div",{className:"auth-profiles"},
-users.map(u=>h("button",{key:u.id,className:"profile-item"+(selected===u.id?" selected":""),
-onClick:()=>{setSel(u.id);setMode("login");setPin("");setError("")}},
-h("div",{className:"profile-avatar",style:{background:u.color}},u.name[0].toUpperCase()),
-h("div",null,
-h("div",{className:"profile-name"},u.name),
-h("div",{className:"profile-meta"},"Created "+formatDate(u.created))
-))),
-h("button",{className:"btn btn-ghost",style:{marginTop:8},onClick:()=>setMode("register")},"+ New Profile")
-):
-h("div",{className:"auth-form"},
-h("div",{style:{textAlign:"center",marginBottom:16}},
-h("div",{className:"profile-avatar",style:{background:users.find(x=>x.id===selected)?.color,width:56,height:56,fontSize:24,margin:"0 auto 8px",borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff"}},
-users.find(x=>x.id===selected)?.name[0].toUpperCase()),
-h("div",{style:{fontWeight:600,fontSize:16}},users.find(x=>x.id===selected)?.name)
 ),
-h("div",{className:"pin-dots"},
-[0,1,2,3].map(i=>h("div",{key:i,className:"pin-dot"+(i<pin.length?" filled":"")}))),
-error&&h("div",{style:{color:"var(--red)",fontSize:13,textAlign:"center",marginBottom:8}},error),
-h("div",{className:"pin-pad"},
-[1,2,3,4,5,6,7,8,9].map(n=>h("button",{key:n,className:"pin-key",onClick:()=>handleKey(String(n))},n)),
-h("button",{className:"pin-key pin-key-action",onClick:()=>{setMode("select");setPin("");setError("")}},"Back"),
-h("button",{className:"pin-key",onClick:()=>handleKey("0")},"0"),
-h("button",{className:"pin-key pin-key-action",onClick:()=>handleKey("del")},"Del")
+users.length>0&&h("div",{className:"auth-switch"},
+"Already have an account? ",
+h("button",{onClick:()=>{setMode("signin");setPin("");setName("");setError("")}},"Sign In")
 )
 )
 );
@@ -1547,6 +1595,7 @@ setDB(u.id,db);
 const handleLogout=()=>{
 setUser(null);
 try{sessionStorage.removeItem("ironlog_session")}catch{}
+try{localStorage.removeItem(LAST_USER_KEY)}catch{}
 };
 
 if(!user)return h(AuthScreen,{onLogin:handleLogin});
