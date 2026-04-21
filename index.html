@@ -554,6 +554,12 @@ const key=planId+"_"+dayId+"_"+weekNum;
 nl[key]={exercises:exData,completedAt:ts||new Date().toISOString(),planId,dayId,weekNum};
 save({...dbRef.current,logs:nl});
 };
+const deleteLog=(planId,dayId,weekNum)=>{
+const nl={...dbRef.current.logs||{}};
+const key=planId+"_"+dayId+"_"+weekNum;
+delete nl[key];
+save({...dbRef.current,logs:nl});
+};
 const addBodyweight=(val)=>{
 const bw=[...(dbRef.current.bodyweight||[]),{value:val,date:new Date().toISOString()}];
 save({...dbRef.current,bodyweight:bw});
@@ -589,7 +595,7 @@ return p;
 
 const pages={
 home:h(HomePage,{user,plans,logs,bodyweight,streak,totalWorkouts,prs,flash,setPage,addBodyweight,settings}),
-workout:h(WorkoutPage,{plans,logs,updatePlans,addLog,flash,settings}),
+workout:h(WorkoutPage,{plans,logs,updatePlans,addLog,deleteLog,flash,settings}),
 analytics:h(AnalyticsPage,{plans,logs,bodyweight,prs,settings,addBodyweight,flash}),
 timer:h(TimerPage,{flash}),
 settings:h(SettingsPage,{user,db:dbRef,save,onLogout,flash,settings})
@@ -725,7 +731,7 @@ h("div",{style:{height:16}})
 }
 
 /* ─── WORKOUT PAGE ─── */
-function WorkoutPage({plans,logs,updatePlans,addLog,flash,settings}){
+function WorkoutPage({plans,logs,updatePlans,addLog,deleteLog,flash,settings}){
 const[view,setView]=S("plans"); // plans, editPlan, log
 const[editPlan,setEditPlan]=S(null);
 const[activePlan,setActivePlan]=S(null);
@@ -1075,14 +1081,17 @@ h("div",{className:"page-title",style:{fontSize:18}},day.name)
 h("div",{style:{width:36}})
 ),
 
-// Week selector
+// Week selector — ✓ only when ALL days in this plan are logged for that week
 h("div",{className:"week-bar"},
 Array.from({length:maxW},(_,i)=>i+1).map(w=>{
-const hasData=loggedWeeks.includes(w);
+const thisDayLogged=loggedWeeks.includes(w);
+const allDaysLogged=plan.days.every(d=>getWeekLog(plan.id,d.id,w)!==null);
+const someDaysLogged=plan.days.some(d=>getWeekLog(plan.id,d.id,w)!==null);
+const weekStyle=activeWeek===w?{}:allDaysLogged?{borderColor:"var(--green)",color:"var(--green)"}:someDaysLogged?{borderColor:"var(--orange)",color:"var(--orange)"}:{};
 return h("button",{key:w,className:"week-btn"+(activeWeek===w?" active":""),
-style:hasData&&activeWeek!==w?{borderColor:"var(--green)",color:"var(--green)"}:{},
+style:weekStyle,
 onClick:()=>switchWeek(w)},
-"W"+w,hasData?h("span",{style:{fontSize:8,marginLeft:2,verticalAlign:"super"}}," ✓"):null
+"W"+w,allDaysLogged?h("span",{style:{fontSize:8,marginLeft:2,verticalAlign:"super"}}," ✓"):someDaysLogged?h("span",{style:{fontSize:8,marginLeft:2,verticalAlign:"super"}}," ½"):null
 );
 }),
 h("button",{className:"week-add",onClick:()=>{const nw=maxW+1;setActiveWeek(nw);setLogMode("log");
@@ -1097,13 +1106,26 @@ setLogData(ld);
 }},"+")
 ),
 
-// Day tabs
+// Day tabs — show which days are logged for the ACTIVE week
 plan.days.length>1&&h("div",{className:"day-tabs"},
 plan.days.map((d,i)=>{
-const dHasLog=getLoggedWeeks(plan.id,d.id).length>0;
+const dayLoggedThisWeek=getWeekLog(plan.id,d.id,activeWeek)!==null;
 return h("button",{key:d.id,className:"day-tab"+(activeDay===i?" active":""),
-style:activeDay===i?{background:d.color||plan.color,borderColor:d.color||plan.color,color:"#fff"}:{},
-onClick:()=>switchDay(i)},d.name,dHasLog&&activeDay!==i?h("span",{style:{fontSize:8,marginLeft:3,color:"var(--green)"}},"●"):null);
+style:activeDay===i?{background:d.color||plan.color,borderColor:d.color||plan.color,color:"#fff"}:dayLoggedThisWeek?{borderColor:"var(--green)",color:"var(--green)"}:{},
+onClick:()=>{setActiveDay(i);
+const thisLog=getWeekLog(plan.id,d.id,activeWeek);
+if(thisLog){setLogMode("history")}else{
+setLogMode("log");
+const ld={};d.exercises.forEach(ex=>{ld[ex.id]={sets:[{weight:"",reps:""}]}});
+const lw=getLoggedWeeks(plan.id,d.id).filter(w=>w<activeWeek);
+if(lw.length>0){const prevLog=logs[plan.id+"_"+d.id+"_"+lw[lw.length-1]];
+if(prevLog?.exercises){Object.entries(prevLog.exercises).forEach(([exName,data])=>{
+const ex=d.exercises.find(e=>e.name===exName||e.id===exName);
+if(ex&&data.sets){ld[ex.id]={sets:data.sets.map(s=>({weight:s.weight||"",reps:s.reps||""}))};}
+});}}
+setLogData(ld);
+}
+}},d.name,dayLoggedThisWeek?h("span",{style:{fontSize:8,marginLeft:3}}," ✓"):null);
 })
 ),
 
@@ -1122,9 +1144,19 @@ setLogData(ld);
 }},"Edit / Re-log")
 ),
 
-// Completed badge
-isHistoryWeek&&logMode==="history"&&h("div",{style:{padding:"8px 16px"}},
-h("div",{className:"completed-badge"},"✓ Completed "+formatDate(currentLog.completedAt))
+// Completed badge + delete button
+isHistoryWeek&&logMode==="history"&&h("div",{style:{padding:"8px 16px",display:"flex",alignItems:"center",justifyContent:"space-between"}},
+h("div",{className:"completed-badge"},"✓ Completed "+formatDate(currentLog.completedAt)),
+h("button",{className:"btn btn-sm",style:{width:"auto",color:"var(--red)",background:"rgba(239,68,68,.1)",border:"1px solid rgba(239,68,68,.2)",padding:"6px 12px"},
+onClick:function(){
+if(confirm("Delete this workout log for W"+activeWeek+" — "+day.name+"?")){
+deleteLog(plan.id,day.id,activeWeek);
+flash("Workout deleted");
+setLogMode("log");
+const ld={};day.exercises.forEach(function(ex){ld[ex.id]={sets:[{weight:"",reps:""}]}});
+setLogData(ld);
+}
+}},h(Icon,{name:"trash",size:14})," Delete")
 ),
 
 // HISTORY VIEW
