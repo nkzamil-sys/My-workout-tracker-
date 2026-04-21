@@ -125,17 +125,28 @@ select.field-input{appearance:none;background-image:url("data:image/svg+xml,%3Cs
 .workout-card-action{width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--tx3);background:var(--bg);border:1px solid var(--bg3)}
 
 /* Exercise log */
-.ex-card{background:var(--bg2);border-radius:var(--radius);padding:14px;margin:0 16px 10px;border:1px solid var(--bg3)}
+.ex-card{background:var(--bg2);border-radius:var(--radius);padding:14px;margin:0 16px 10px;border:1px solid var(--bg3);overflow:hidden}
 .ex-header{display:flex;align-items:center;gap:10px;margin-bottom:12px}
 .ex-number{font-family:var(--mono);font-size:11px;color:var(--tx4);font-weight:600;width:24px;height:24px;display:flex;align-items:center;justify-content:center;background:var(--bg);border-radius:6px}
 .ex-name{font-size:14px;font-weight:600;flex:1}
 .ex-prev{font-size:11px;color:var(--tx3);font-family:var(--mono)}
 .set-row{display:flex;gap:8px;margin-bottom:6px;align-items:center}
 .set-label{font-size:11px;font-weight:700;color:var(--tx4);font-family:var(--mono);width:32px;text-align:center}
-.set-input{flex:1;background:var(--bg);border:1px solid var(--bg3);border-radius:8px;color:var(--tx);font-size:16px;font-weight:600;font-family:var(--mono);padding:8px;text-align:center;outline:none}
+.set-input{flex:1;min-width:0;background:var(--bg);border:1px solid var(--bg3);border-radius:8px;color:var(--tx);font-size:16px;font-weight:600;font-family:var(--mono);padding:8px;text-align:center;outline:none;box-sizing:border-box}
 .set-input:focus{border-color:var(--blue)}
 .set-input-label{font-size:9px;color:var(--tx4);font-family:var(--mono);text-align:center;font-weight:600;letter-spacing:1px;margin-bottom:2px}
 .add-set-btn{display:flex;align-items:center;justify-content:center;gap:4px;width:100%;padding:6px;border:1px dashed var(--bg3);border-radius:8px;color:var(--tx3);font-size:12px;font-weight:600;margin-top:4px}
+
+/* History view */
+.hist-set{display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--bg3)}
+.hist-set:last-child{border-bottom:none}
+.hist-val{font-family:var(--mono);font-size:15px;font-weight:700;color:var(--tx)}
+.hist-lbl{font-size:10px;color:var(--tx3);font-family:var(--mono);font-weight:600;margin-left:2px}
+.hist-empty{font-size:13px;color:var(--tx4);font-style:italic;padding:8px 0}
+.view-toggle{display:flex;margin:8px 16px;border:1px solid var(--bg3);border-radius:10px;overflow:hidden}
+.view-toggle-btn{flex:1;background:transparent;border:none;color:var(--tx3);padding:8px;font-size:13px;font-weight:600;font-family:var(--font);cursor:pointer;transition:all .15s}
+.view-toggle-btn.active{background:var(--bg3);color:var(--tx)}
+.completed-badge{display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:6px;font-size:11px;font-weight:700;background:rgba(16,185,129,.15);color:var(--green)}
 
 /* Week bar */
 .week-bar{display:flex;gap:6px;padding:4px 16px 10px;overflow-x:auto}
@@ -804,17 +815,23 @@ setEdExercises(ne);
 };
 
 // Workout logging
+const[logMode,setLogMode]=S("log"); // "log" or "history"
+
 const startWorkout=(plan,dayIdx)=>{
-setActivePlan(plan);setActiveDay(dayIdx);setActiveWeek(1);
-// Initialize log data with 3 sets per exercise
+setActivePlan(plan);setActiveDay(dayIdx);
+// Find all logged weeks for this plan+day
+const loggedWeeks=Object.keys(logs).filter(k=>k.startsWith(plan.id+"_"+plan.days[dayIdx].id+"_")).map(k=>parseInt(k.split("_")[2])).sort((a,b)=>a-b);
+// Set week to next unlogged week
+const nextWeek=loggedWeeks.length>0?Math.max(...loggedWeeks)+1:1;
+setActiveWeek(nextWeek);
+// Initialize log data
 const ld={};
 plan.days[dayIdx].exercises.forEach(ex=>{
 ld[ex.id]={sets:[{weight:"",reps:""}]};
 });
-// Check for previous data to prefill
-const prevWeeks=Object.keys(logs).filter(k=>k.startsWith(plan.id+"_"+plan.days[dayIdx].id+"_")).map(k=>parseInt(k.split("_")[2])).sort((a,b)=>b-a);
-if(prevWeeks.length>0){
-const prevLog=logs[plan.id+"_"+plan.days[dayIdx].id+"_"+prevWeeks[0]];
+// Prefill from last logged week
+if(loggedWeeks.length>0){
+const prevLog=logs[plan.id+"_"+plan.days[dayIdx].id+"_"+loggedWeeks[loggedWeeks.length-1]];
 if(prevLog?.exercises){
 Object.entries(prevLog.exercises).forEach(([exName,data])=>{
 const ex=plan.days[dayIdx].exercises.find(e=>e.name===exName||e.id===exName);
@@ -823,9 +840,19 @@ ld[ex.id]={sets:data.sets.map(s=>({weight:s.weight||"",reps:s.reps||""}))};
 }
 });
 }
-setActiveWeek(prevWeeks[0]+1);
 }
-setLogData(ld);setView("log");
+setLogData(ld);setLogMode("log");setView("log");
+};
+
+// Get log data for a specific week+day (for history view)
+const getWeekLog=(planId,dayId,weekNum)=>{
+const key=planId+"_"+dayId+"_"+weekNum;
+return logs[key]||null;
+};
+
+// Get all logged week numbers for a plan+day
+const getLoggedWeeks=(planId,dayId)=>{
+return Object.keys(logs).filter(k=>k.startsWith(planId+"_"+dayId+"_")).map(k=>parseInt(k.split("_")[2])).sort((a,b)=>a-b);
 };
 
 const updateSet=(exId,setIdx,field,val)=>{
@@ -994,6 +1021,49 @@ h("button",{className:"btn btn-ghost",onClick:()=>startEditDay(null)},"+ Add Day
 if(view==="log"){
 const plan=activePlan;
 const day=plan.days[activeDay];
+const loggedWeeks=getLoggedWeeks(plan.id,day.id);
+const allWeeks=Array.from(new Set([...loggedWeeks,activeWeek])).sort((a,b)=>a-b);
+const maxW=Math.max(activeWeek,...allWeeks,5);
+const currentLog=getWeekLog(plan.id,day.id,activeWeek);
+const isHistoryWeek=currentLog!==null;
+
+// When switching weeks, auto-toggle view mode
+const switchWeek=(w)=>{
+setActiveWeek(w);
+const hasLog=getWeekLog(plan.id,day.id,w)!==null;
+if(hasLog){setLogMode("history")}else{setLogMode("log");
+// Prefill from last logged week before this one
+const prevW=loggedWeeks.filter(wk=>wk<w);
+const ld={};day.exercises.forEach(ex=>{ld[ex.id]={sets:[{weight:"",reps:""}]}});
+if(prevW.length>0){
+const prevLog=logs[plan.id+"_"+day.id+"_"+prevW[prevW.length-1]];
+if(prevLog?.exercises){
+Object.entries(prevLog.exercises).forEach(([exName,data])=>{
+const ex=day.exercises.find(e=>e.name===exName||e.id===exName);
+if(ex&&data.sets){ld[ex.id]={sets:data.sets.map(s=>({weight:s.weight||"",reps:s.reps||""}))};}
+});}
+}
+setLogData(ld);
+}
+};
+
+const switchDay=(i)=>{
+setActiveDay(i);
+const d=plan.days[i];
+const lw=getLoggedWeeks(plan.id,d.id);
+const nextW=lw.length>0?Math.max(...lw)+1:1;
+setActiveWeek(nextW);
+const ld={};d.exercises.forEach(ex=>{ld[ex.id]={sets:[{weight:"",reps:""}]}});
+if(lw.length>0){
+const prevLog=logs[plan.id+"_"+d.id+"_"+lw[lw.length-1]];
+if(prevLog?.exercises){
+Object.entries(prevLog.exercises).forEach(([exName,data])=>{
+const ex=d.exercises.find(e=>e.name===exName||e.id===exName);
+if(ex&&data.sets){ld[ex.id]={sets:data.sets.map(s=>({weight:s.weight||"",reps:s.reps||""}))};}
+});}
+}
+setLogData(ld);setLogMode("log");
+};
 
 return h("div",null,
 h("div",{className:"page-header"},
@@ -1007,24 +1077,83 @@ h("div",{style:{width:36}})
 
 // Week selector
 h("div",{className:"week-bar"},
-Array.from({length:Math.max(activeWeek,5)},(_,i)=>i+1).map(w=>
-h("button",{key:w,className:"week-btn"+(activeWeek===w?" active":""),onClick:()=>setActiveWeek(w)},"W"+w)
-),
-h("button",{className:"week-add",onClick:()=>setActiveWeek(activeWeek+1)},"+")
+Array.from({length:maxW},(_,i)=>i+1).map(w=>{
+const hasData=loggedWeeks.includes(w);
+return h("button",{key:w,className:"week-btn"+(activeWeek===w?" active":""),
+style:hasData&&activeWeek!==w?{borderColor:"var(--green)",color:"var(--green)"}:{},
+onClick:()=>switchWeek(w)},
+"W"+w,hasData?h("span",{style:{fontSize:8,marginLeft:2,verticalAlign:"super"}}," ✓"):null
+);
+}),
+h("button",{className:"week-add",onClick:()=>{const nw=maxW+1;setActiveWeek(nw);setLogMode("log");
+const ld={};day.exercises.forEach(ex=>{ld[ex.id]={sets:[{weight:"",reps:""}]}});
+const prevW=loggedWeeks.length>0?loggedWeeks[loggedWeeks.length-1]:null;
+if(prevW){const prevLog=logs[plan.id+"_"+day.id+"_"+prevW];
+if(prevLog?.exercises){Object.entries(prevLog.exercises).forEach(([exName,data])=>{
+const ex=day.exercises.find(e=>e.name===exName||e.id===exName);
+if(ex&&data.sets){ld[ex.id]={sets:data.sets.map(s=>({weight:s.weight||"",reps:s.reps||""}))};}
+});}}
+setLogData(ld);
+}},"+")
 ),
 
-// Day tabs (switch between days in same plan)
+// Day tabs
 plan.days.length>1&&h("div",{className:"day-tabs"},
-plan.days.map((d,i)=>
-h("button",{key:d.id,className:"day-tab"+(activeDay===i?" active":""),
+plan.days.map((d,i)=>{
+const dHasLog=getLoggedWeeks(plan.id,d.id).length>0;
+return h("button",{key:d.id,className:"day-tab"+(activeDay===i?" active":""),
 style:activeDay===i?{background:d.color||plan.color,borderColor:d.color||plan.color,color:"#fff"}:{},
-onClick:()=>{setActiveDay(i);
-const ld={};d.exercises.forEach(ex=>{ld[ex.id]={sets:[{weight:"",reps:""}]}});setLogData(ld);
-}},d.name)
-)
+onClick:()=>switchDay(i)},d.name,dHasLog&&activeDay!==i?h("span",{style:{fontSize:8,marginLeft:3,color:"var(--green)"}},"●"):null);
+})
 ),
 
-// Exercises
+// View toggle (history vs log) for weeks that have data
+isHistoryWeek&&h("div",{className:"view-toggle"},
+h("button",{className:"view-toggle-btn"+(logMode==="history"?" active":""),onClick:()=>setLogMode("history")},"History"),
+h("button",{className:"view-toggle-btn"+(logMode==="log"?" active":""),onClick:()=>{
+setLogMode("log");
+// Prefill from this week's existing data for re-logging
+const ld={};day.exercises.forEach(ex=>{ld[ex.id]={sets:[{weight:"",reps:""}]}});
+if(currentLog?.exercises){Object.entries(currentLog.exercises).forEach(([exName,data])=>{
+const ex=day.exercises.find(e=>e.name===exName||e.id===exName);
+if(ex&&data.sets){ld[ex.id]={sets:data.sets.map(s=>({weight:s.weight||"",reps:s.reps||""}))};}
+});}
+setLogData(ld);
+}},"Edit / Re-log")
+),
+
+// Completed badge
+isHistoryWeek&&logMode==="history"&&h("div",{style:{padding:"8px 16px"}},
+h("div",{className:"completed-badge"},"✓ Completed "+formatDate(currentLog.completedAt))
+),
+
+// HISTORY VIEW
+logMode==="history"&&isHistoryWeek?
+day.exercises.map((ex,i)=>{
+const exLog=currentLog?.exercises?.[ex.name];
+const sets=exLog?.sets||[];
+return h("div",{key:ex.id,className:"ex-card"},
+h("div",{className:"ex-header"},
+h("div",{className:"ex-number"},String(i+1).padStart(2,"0")),
+h("div",{className:"ex-name"},ex.name)
+),
+sets.length>0?
+sets.map((s,si)=>
+h("div",{key:si,className:"hist-set"},
+h("div",{className:"set-label"},si+1),
+h("span",{className:"hist-val"},s.weight||"—"),
+h("span",{className:"hist-lbl"},unit),
+h("span",{style:{color:"var(--tx4)",margin:"0 6px"}},"×"),
+h("span",{className:"hist-val"},s.reps||"—"),
+h("span",{className:"hist-lbl"},"reps")
+)
+):
+h("div",{className:"hist-empty"},"No data logged")
+);
+}):
+
+// LOG VIEW (editable)
+h("div",null,
 day.exercises.map((ex,i)=>{
 const prev=getPrevData(plan.id,day.id,ex.name);
 const sets=(logData[ex.id]?.sets)||[{weight:"",reps:""}];
@@ -1034,31 +1163,31 @@ h("div",{className:"ex-number"},String(i+1).padStart(2,"0")),
 h("div",{className:"ex-name"},ex.name),
 prev!==null&&h("div",{className:"ex-prev"},"prev "+prev+unit)
 ),
-// Set header
 h("div",{className:"set-row",style:{marginBottom:4}},
 h("div",{className:"set-label"},"SET"),
-h("div",{style:{flex:1}},h("div",{className:"set-input-label"},unit.toUpperCase())),
-h("div",{style:{flex:1}},h("div",{className:"set-input-label"},"REPS")),
+h("div",{style:{flex:1,minWidth:0}},h("div",{className:"set-input-label"},unit.toUpperCase())),
+h("div",{style:{flex:1,minWidth:0}},h("div",{className:"set-input-label"},"REPS")),
 h("div",{style:{width:28}})
 ),
 sets.map((s,si)=>
 h("div",{key:si,className:"set-row"},
 h("div",{className:"set-label"},si+1),
 h("input",{className:"set-input",type:"number",inputMode:"decimal",value:s.weight,placeholder:"—",
-onChange:e=>updateSet(ex.id,si,"weight",e.target.value)}),
+onChange:function(e){updateSet(ex.id,si,"weight",e.target.value)}}),
 h("input",{className:"set-input",type:"number",inputMode:"numeric",value:s.reps,placeholder:"—",
-onChange:e=>updateSet(ex.id,si,"reps",e.target.value)}),
+onChange:function(e){updateSet(ex.id,si,"reps",e.target.value)}}),
 sets.length>1?h("button",{style:{color:"var(--red)",fontSize:14,width:28,textAlign:"center"},
-onClick:()=>removeSet(ex.id,si)},"×"):h("div",{style:{width:28}})
+onClick:function(){removeSet(ex.id,si)}},"×"):h("div",{style:{width:28}})
 )
 ),
-h("button",{className:"add-set-btn",onClick:()=>addSet(ex.id)},"+ Add Set")
+h("button",{className:"add-set-btn",onClick:function(){addSet(ex.id)}},"+ Add Set")
 );
 }),
 
 h("div",{style:{padding:"8px 16px 16px"}},
 h("button",{className:"btn btn-success",style:{fontSize:16,padding:16,letterSpacing:1},onClick:completeWorkout},
-"✓ COMPLETE WORKOUT")
+isHistoryWeek?"✓ UPDATE WORKOUT":"✓ COMPLETE WORKOUT")
+)
 )
 );
 }
@@ -1176,6 +1305,78 @@ sets.forEach(s=>{v+=(parseFloat(s.weight)||0)*(parseInt(s.reps)||0)});
 return v;
 },[logs]);
 
+// Frequency: workouts per week for last 8 weeks
+const freqChartRef=R(null);const freqChartInst=R(null);
+E(()=>{
+if(!freqChartRef.current||tab!=="overview")return;
+if(freqChartInst.current)freqChartInst.current.destroy();
+const weeks=[];const now=new Date();
+for(let i=7;i>=0;i--){
+const start=new Date(now);start.setDate(now.getDate()-i*7);
+const end=new Date(start);end.setDate(start.getDate()+7);
+const count=Object.values(logs).filter(l=>{const d=new Date(l.completedAt);return d>=start&&d<end}).length;
+const label="W"+(8-i);
+weeks.push({label,count});
+}
+freqChartInst.current=new Chart(freqChartRef.current,{
+type:"bar",
+data:{labels:weeks.map(w=>w.label),
+datasets:[{data:weeks.map(w=>w.count),backgroundColor:"rgba(139,92,246,.6)",borderRadius:6,borderSkipped:false}]},
+options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
+scales:{x:{ticks:{color:"#64748B",font:{size:10}},grid:{display:false}},
+y:{ticks:{color:"#64748B",font:{size:10},stepSize:1},grid:{color:"#1E293B"},beginAtZero:true}}}
+});
+return()=>{if(freqChartInst.current)freqChartInst.current.destroy()};
+},[logs,tab]);
+
+// Estimated 1RM (Epley formula: weight * (1 + reps/30))
+const e1rms=M(()=>{
+const rm={};
+Object.values(logs).forEach(l=>{
+if(!l.exercises)return;
+Object.entries(l.exercises).forEach(([exName,data])=>{
+const sets=data.sets||[data];
+sets.forEach(s=>{
+const w=parseFloat(s.weight)||0;const r=parseInt(s.reps)||0;
+if(w>0&&r>0){
+const est=r===1?w:Math.round(w*(1+r/30));
+if(!rm[exName]||est>rm[exName].value){rm[exName]={value:est,weight:w,reps:r}}
+}
+});
+});
+});
+return rm;
+},[logs]);
+
+// Most improved: exercises with biggest weight increase from first to last log
+const improved=M(()=>{
+const first={};const last={};
+const sorted=Object.values(logs).sort((a,b)=>new Date(a.completedAt)-new Date(b.completedAt));
+sorted.forEach(l=>{
+if(!l.exercises)return;
+Object.entries(l.exercises).forEach(([exName,data])=>{
+const sets=data.sets||[data];
+const maxW=Math.max(...sets.map(s=>parseFloat(s.weight)||0));
+if(maxW>0){
+if(!first[exName])first[exName]=maxW;
+last[exName]=maxW;
+}
+});
+});
+return Object.keys(first).map(name=>({name,first:first[name],last:last[name],gain:last[name]-first[name],pct:first[name]>0?Math.round(((last[name]-first[name])/first[name])*100):0}))
+.filter(x=>x.gain>0).sort((a,b)=>b.pct-a.pct).slice(0,5);
+},[logs]);
+
+// Average workout duration placeholder and total sets
+const totalSets=M(()=>{
+let s=0;
+Object.values(logs).forEach(l=>{
+if(!l.exercises)return;
+Object.values(l.exercises).forEach(ex=>{s+=(ex.sets||[ex]).length});
+});
+return s;
+},[logs]);
+
 return h("div",null,
 h("div",{className:"page-header"},
 h("div",{className:"page-title"},"Analytics")
@@ -1189,20 +1390,50 @@ t==="overview"?"Overview":t==="exercises"?"Exercises":"Body Weight")
 ),
 
 tab==="overview"&&h("div",null,
+// Stats row
 h("div",{className:"stat-row"},
 h("div",{className:"stat-card"},
 h("div",{className:"stat-val",style:{color:"var(--blue)",fontSize:18}},Object.keys(logs).length),
 h("div",{className:"stat-label"},"Workouts")),
 h("div",{className:"stat-card"},
-h("div",{className:"stat-val",style:{color:"var(--green)",fontSize:18}},(totalVolume/1000).toFixed(0)+"k"),
-h("div",{className:"stat-label"},"Total Vol ("+unit+")"))
+h("div",{className:"stat-val",style:{color:"var(--green)",fontSize:18}},totalSets),
+h("div",{className:"stat-label"},"Total Sets")),
+h("div",{className:"stat-card"},
+h("div",{className:"stat-val",style:{color:"var(--purple)",fontSize:18}},(totalVolume/1000).toFixed(0)+"k"),
+h("div",{className:"stat-label"},"Vol ("+unit+")"))
 ),
+
+// Volume chart
 h("div",{className:"chart-container"},
 h("div",{className:"chart-title"},"Volume — Last 7 Days"),
 h("canvas",{ref:volChartRef,className:"chart-canvas",height:180})
 ),
+
+// Frequency chart
+h("div",{className:"chart-container"},
+h("div",{className:"chart-title"},"Workout Frequency — Last 8 Weeks"),
+h("canvas",{ref:freqChartRef,className:"chart-canvas",height:160})
+),
+
+// Most improved
+improved.length>0&&h("div",null,
+h("div",{className:"section-title"},"Most Improved"),
+h("div",{style:{padding:"0 16px"}},
+improved.map(ex=>
+h("div",{key:ex.name,style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 12px",marginBottom:6,background:"var(--bg2)",borderRadius:10,border:"1px solid var(--bg3)"}},
+h("div",null,
+h("div",{style:{fontSize:14,fontWeight:600}},ex.name),
+h("div",{style:{fontSize:11,color:"var(--tx3)"}},ex.first+" → "+ex.last+" "+unit)
+),
+h("div",{style:{fontSize:16,fontWeight:800,fontFamily:"var(--mono)",color:"var(--green)"}},"+"+ex.pct+"%")
+)
+)
+)
+),
+
+// PRs
 Object.keys(prs).length>0&&h("div",null,
-h("div",{className:"section-title"},"All Personal Records"),
+h("div",{className:"section-title"},"Personal Records"),
 h("div",{style:{padding:"0 16px"}},
 Object.entries(prs).sort((a,b)=>b[1].weight-a[1].weight).map(([name,pr])=>
 h("div",{key:name,style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderBottom:"1px solid var(--bg3)"}},
@@ -1231,14 +1462,33 @@ selExercise&&h("div",{className:"chart-container"},
 h("div",{className:"chart-title"},selExercise+" — Weight Progress"),
 h("canvas",{ref:chartRef,className:"chart-canvas",height:200})
 ),
+// Exercise stats
 selExercise&&prs[selExercise]&&h("div",{className:"stat-row"},
 h("div",{className:"stat-card"},
 h("div",{className:"stat-val",style:{color:"var(--orange)"}},prs[selExercise].weight),
 h("div",{className:"stat-label"},"PR ("+unit+")")),
 h("div",{className:"stat-card"},
+h("div",{className:"stat-val",style:{color:"var(--cyan)"}},e1rms[selExercise]?.value||"—"),
+h("div",{className:"stat-label"},"Est. 1RM")),
+h("div",{className:"stat-card"},
 h("div",{className:"stat-val",style:{color:"var(--blue)"}},formatDate(prs[selExercise].date)),
 h("div",{className:"stat-label"},"PR Date"))
+),
+// All exercises estimated 1RM table
+!selExercise&&Object.keys(e1rms).length>0&&h("div",null,
+h("div",{className:"section-title"},"Estimated 1RM (Epley)"),
+h("div",{style:{padding:"0 16px"}},
+Object.entries(e1rms).sort((a,b)=>b[1].value-a[1].value).map(([name,rm])=>
+h("div",{key:name,style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderBottom:"1px solid var(--bg3)",cursor:"pointer"},
+onClick:function(){setSelExercise(name)}},
+h("div",null,
+h("div",{style:{fontSize:14,fontWeight:500}},name),
+h("div",{style:{fontSize:11,color:"var(--tx3)"}},"Best: "+rm.weight+unit+" x "+rm.reps)
+),
+h("div",{style:{fontFamily:"var(--mono)",fontWeight:700,color:"var(--cyan)",fontSize:16}},rm.value+" "+unit)
 )
+)
+))
 )
 ),
 
