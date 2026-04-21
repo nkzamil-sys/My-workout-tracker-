@@ -1149,13 +1149,15 @@ isHistoryWeek&&logMode==="history"&&h("div",{style:{padding:"8px 16px",display:"
 h("div",{className:"completed-badge"},"✓ Completed "+formatDate(currentLog.completedAt)),
 h("button",{className:"btn btn-sm",style:{width:"auto",color:"var(--red)",background:"rgba(239,68,68,.1)",border:"1px solid rgba(239,68,68,.2)",padding:"6px 12px"},
 onClick:function(){
-if(confirm("Delete this workout log for W"+activeWeek+" — "+day.name+"?")){
+setConfirm({title:"Delete Workout",message:"Delete this workout log for W"+activeWeek+" — "+day.name+"? This cannot be undone.",
+danger:true,onCancel:function(){setConfirm(null)},onConfirm:function(){
 deleteLog(plan.id,day.id,activeWeek);
 flash("Workout deleted");
 setLogMode("log");
 const ld={};day.exercises.forEach(function(ex){ld[ex.id]={sets:[{weight:"",reps:""}]}});
 setLogData(ld);
-}
+setConfirm(null);
+}});
 }},h(Icon,{name:"trash",size:14})," Delete")
 ),
 
@@ -1220,7 +1222,9 @@ h("div",{style:{padding:"8px 16px 16px"}},
 h("button",{className:"btn btn-success",style:{fontSize:16,padding:16,letterSpacing:1},onClick:completeWorkout},
 isHistoryWeek?"✓ UPDATE WORKOUT":"✓ COMPLETE WORKOUT")
 )
-)
+),
+
+confirm&&h(ConfirmDialog,confirm)
 );
 }
 }
