@@ -564,6 +564,31 @@ const addBodyweight=(val)=>{
 const bw=[...(dbRef.current.bodyweight||[]),{value:val,date:new Date().toISOString()}];
 save({...dbRef.current,bodyweight:bw});
 };
+const editBodyweight=(idx,val)=>{
+const bw=[...(dbRef.current.bodyweight||[])];
+if(bw[idx]){bw[idx]={...bw[idx],value:val};save({...dbRef.current,bodyweight:bw});}
+};
+const deleteBodyweight=(idx)=>{
+const bw=(dbRef.current.bodyweight||[]).filter((_,i)=>i!==idx);
+save({...dbRef.current,bodyweight:bw});
+};
+// Rename an exercise in all past logs (so logs follow the new name)
+const renameExerciseInLogs=(oldName,newName)=>{
+if(oldName===newName||!oldName||!newName)return;
+const newLogs={...(dbRef.current.logs||{})};
+let changed=false;
+Object.keys(newLogs).forEach(k=>{
+const log=newLogs[k];
+if(log&&log.exercises&&log.exercises[oldName]!==undefined){
+const ex={...log.exercises};
+ex[newName]=ex[oldName];
+delete ex[oldName];
+newLogs[k]={...log,exercises:ex};
+changed=true;
+}
+});
+if(changed)save({...dbRef.current,logs:newLogs});
+};
 
 const totalWorkouts=Object.keys(logs).length;
 const streak=(()=>{
@@ -595,8 +620,8 @@ return p;
 
 const pages={
 home:h(HomePage,{user,plans,logs,bodyweight,streak,totalWorkouts,prs,flash,setPage,addBodyweight,settings}),
-workout:h(WorkoutPage,{plans,logs,updatePlans,addLog,deleteLog,flash,settings}),
-analytics:h(AnalyticsPage,{plans,logs,bodyweight,prs,settings,addBodyweight,flash}),
+workout:h(WorkoutPage,{plans,logs,updatePlans,addLog,deleteLog,renameExerciseInLogs,flash,settings}),
+analytics:h(AnalyticsPage,{plans,logs,bodyweight,prs,settings,addBodyweight,editBodyweight,deleteBodyweight,flash}),
 timer:h(TimerPage,{flash}),
 settings:h(SettingsPage,{user,db:dbRef,save,onLogout,flash,settings})
 };
@@ -731,7 +756,7 @@ h("div",{style:{height:16}})
 }
 
 /* ─── WORKOUT PAGE ─── */
-function WorkoutPage({plans,logs,updatePlans,addLog,deleteLog,flash,settings}){
+function WorkoutPage({plans,logs,updatePlans,addLog,deleteLog,renameExerciseInLogs,flash,settings}){
 const[view,setView]=S("plans"); // plans, editPlan, log
 const[editPlan,setEditPlan]=S(null);
 const[activePlan,setActivePlan]=S(null);
@@ -750,6 +775,13 @@ const[edName,setEdName]=S("");
 const[edColor,setEdColor]=S(COLORS[0]);
 const[edExercises,setEdExercises]=S([]);
 const[newExName,setNewExName]=S("");
+
+// Inline editing state (used inside log view)
+const[editingExId,setEditingExId]=S(null); // id of exercise being renamed
+const[editingExName,setEditingExName]=S("");
+const[newLogExName,setNewLogExName]=S(""); // input for adding exercise mid-workout
+const[editingHistSet,setEditingHistSet]=S(null); // {exName,setIdx,field}
+const[editingHistVal,setEditingHistVal]=S("");
 
 const startEditPlan=(plan)=>{
 if(plan){
@@ -820,6 +852,117 @@ if(ni<0||ni>=ne.length)return;
 setEdExercises(ne);
 };
 
+// ── In-workout edit helpers ─────────────────────────────────────────────────
+// Rename an exercise from inside the log view, updating plan + past logs
+const renameExInPlan=(planId,dayId,exId,newName)=>{
+const trimmed=(newName||"").trim();
+if(!trimmed){flash("Name can't be empty","error");return false}
+let oldName=null;
+const newPlans=plans.map(p=>{
+if(p.id!==planId)return p;
+return{...p,days:p.days.map(d=>{
+if(d.id!==dayId)return d;
+return{...d,exercises:d.exercises.map(e=>{
+if(e.id!==exId)return e;
+oldName=e.name;
+return{...e,name:trimmed};
+})};
+})};
+});
+if(oldName===null)return false;
+if(oldName===trimmed){setEditingExId(null);return true}
+updatePlans(newPlans);
+// Update activePlan reference so log view re-renders correctly
+if(activePlan&&activePlan.id===planId){
+const np=newPlans.find(p=>p.id===planId);
+if(np)setActivePlan(np);
+}
+// Propagate rename to all past logs
+renameExerciseInLogs(oldName,trimmed);
+setEditingExId(null);
+flash("Exercise renamed");
+return true;
+};
+
+// Add a new exercise to the active plan day from inside the log view
+const addExInPlan=(planId,dayId,name)=>{
+const trimmed=(name||"").trim();
+if(!trimmed){flash("Enter a name","error");return false}
+const newExId=uid();
+const newPlans=plans.map(p=>{
+if(p.id!==planId)return p;
+return{...p,days:p.days.map(d=>{
+if(d.id!==dayId)return d;
+return{...d,exercises:[...d.exercises,{id:newExId,name:trimmed}]};
+})};
+});
+updatePlans(newPlans);
+if(activePlan&&activePlan.id===planId){
+const np=newPlans.find(p=>p.id===planId);
+if(np)setActivePlan(np);
+}
+// Add empty set entry for the new exercise so it shows up immediately
+setLogData(prev=>({...prev,[newExId]:{sets:[{weight:"",reps:""}]}}));
+flash("Exercise added");
+return true;
+};
+
+// Remove an exercise from the active plan day
+const removeExInPlan=(planId,dayId,exId)=>{
+const newPlans=plans.map(p=>{
+if(p.id!==planId)return p;
+return{...p,days:p.days.map(d=>{
+if(d.id!==dayId)return d;
+return{...d,exercises:d.exercises.filter(e=>e.id!==exId)};
+})};
+});
+updatePlans(newPlans);
+if(activePlan&&activePlan.id===planId){
+const np=newPlans.find(p=>p.id===planId);
+if(np)setActivePlan(np);
+}
+setLogData(prev=>{const c={...prev};delete c[exId];return c});
+flash("Exercise removed");
+};
+
+// Update a single set inside an already-logged workout (history inline edit)
+const updateLoggedSet=(planId,dayId,weekNum,exName,setIdx,field,val)=>{
+const key=planId+"_"+dayId+"_"+weekNum;
+const log=logs[key];
+if(!log||!log.exercises||!log.exercises[exName])return;
+const newExercises=JSON.parse(JSON.stringify(log.exercises));
+const sets=newExercises[exName].sets||[];
+if(!sets[setIdx])return;
+sets[setIdx][field]=val;
+newExercises[exName].sets=sets;
+addLog(planId,dayId,weekNum,newExercises,log.completedAt);
+};
+
+// Add a new set to a logged exercise
+const addLoggedSet=(planId,dayId,weekNum,exName)=>{
+const key=planId+"_"+dayId+"_"+weekNum;
+const log=logs[key];
+if(!log||!log.exercises)return;
+const newExercises=JSON.parse(JSON.stringify(log.exercises));
+if(!newExercises[exName])newExercises[exName]={sets:[]};
+const sets=newExercises[exName].sets||[];
+const last=sets[sets.length-1]||{weight:"",reps:""};
+sets.push({weight:last.weight||"",reps:last.reps||""});
+newExercises[exName].sets=sets;
+addLog(planId,dayId,weekNum,newExercises,log.completedAt);
+};
+
+// Remove a single set from a logged exercise
+const removeLoggedSet=(planId,dayId,weekNum,exName,setIdx)=>{
+const key=planId+"_"+dayId+"_"+weekNum;
+const log=logs[key];
+if(!log||!log.exercises||!log.exercises[exName])return;
+const newExercises=JSON.parse(JSON.stringify(log.exercises));
+const sets=(newExercises[exName].sets||[]).filter((_,i)=>i!==setIdx);
+newExercises[exName].sets=sets;
+addLog(planId,dayId,weekNum,newExercises,log.completedAt);
+};
+
 // Workout logging
 const[logMode,setLogMode]=S("log"); // "log" or "history"
 
@@ -850,7 +993,25 @@ ld[ex.id]={sets:data.sets.map(s=>({weight:s.weight||"",reps:s.reps||""}))};
 setLogData(ld);setLogMode("log");setView("log");
 };
 
-// Get log data for a specific week+day (for history view)
+// View an already-logged workout — jump to the most recent logged week in history mode
+const viewWorkout=(plan,dayIdx)=>{
+setActivePlan(plan);setActiveDay(dayIdx);
+const day=plan.days[dayIdx];
+const lw=Object.keys(logs).filter(k=>k.startsWith(plan.id+"_"+day.id+"_")).map(k=>parseInt(k.split("_")[2])).sort((a,b)=>a-b);
+if(lw.length===0){startWorkout(plan,dayIdx);return}
+const targetW=lw[lw.length-1];
+setActiveWeek(targetW);
+// logData must still have an entry per exercise so the editable form can render if user toggles
+const ld={};day.exercises.forEach(ex=>{ld[ex.id]={sets:[{weight:"",reps:""}]}});
+const targetLog=logs[plan.id+"_"+day.id+"_"+targetW];
+if(targetLog?.exercises){
+Object.entries(targetLog.exercises).forEach(([exName,data])=>{
+const ex=day.exercises.find(e=>e.name===exName||e.id===exName);
+if(ex&&data.sets){ld[ex.id]={sets:data.sets.map(s=>({weight:s.weight||"",reps:s.reps||""}))};}
+});
+}
+setLogData(ld);setLogMode("history");setView("log");
+};
 const getWeekLog=(planId,dayId,weekNum)=>{
 const key=planId+"_"+dayId+"_"+weekNum;
 return logs[key]||null;
@@ -932,16 +1093,22 @@ h("button",{className:"workout-card-action",onClick:()=>startEditPlan(plan)},h(I
 h("button",{className:"workout-card-action",onClick:()=>deletePlan(plan.id)},h(Icon,{name:"trash",size:14}))
 )
 ),
-plan.days.map((day,di)=>
-h("div",{key:day.id,style:{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 0",borderBottom:di<plan.days.length-1?"1px solid var(--bg3)":"none"}},
-h("div",null,
+plan.days.map((day,di)=>{
+const dayLoggedWeeks=getLoggedWeeks(plan.id,day.id);
+const hasLogs=dayLoggedWeeks.length>0;
+return h("div",{key:day.id,style:{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 0",borderBottom:di<plan.days.length-1?"1px solid var(--bg3)":"none",gap:8}},
+h("div",{style:{flex:1,minWidth:0}},
 h("div",{style:{fontSize:14,fontWeight:600}},day.name),
-h("div",{style:{fontSize:12,color:"var(--tx3)"}},day.exercises.length+" exercises")
+h("div",{style:{fontSize:12,color:"var(--tx3)"}},day.exercises.length+" exercises"+(hasLogs?" · "+dayLoggedWeeks.length+" logged":""))
 ),
+h("div",{style:{display:"flex",gap:6,flexShrink:0}},
+hasLogs&&h("button",{className:"btn btn-sm",style:{background:"var(--bg)",color:day.color||plan.color,border:"1px solid "+(day.color||plan.color),width:"auto",padding:"8px 12px"},
+onClick:()=>viewWorkout(plan,di)},"View"),
 h("button",{className:"btn btn-sm",style:{background:day.color||plan.color,color:"#fff",width:"auto"},
-onClick:()=>startWorkout(plan,di)},"Start")
+onClick:()=>startWorkout(plan,di)},hasLogs?"Start":"Start")
 )
-)
+);
+})
 )
 )),
 confirm&&h(ConfirmDialog,confirm)
@@ -1163,39 +1330,122 @@ setConfirm(null);
 
 // HISTORY VIEW
 logMode==="history"&&isHistoryWeek?
+h("div",null,
 day.exercises.map((ex,i)=>{
 const exLog=currentLog?.exercises?.[ex.name];
 const sets=exLog?.sets||[];
+const isEditingThis=editingExId===ex.id;
 return h("div",{key:ex.id,className:"ex-card"},
 h("div",{className:"ex-header"},
 h("div",{className:"ex-number"},String(i+1).padStart(2,"0")),
-h("div",{className:"ex-name"},ex.name)
+isEditingThis?
+h("input",{className:"field-input",style:{flex:1,fontSize:14,padding:"6px 10px"},
+value:editingExName,autoFocus:true,
+onChange:function(e){setEditingExName(e.target.value)},
+onKeyDown:function(e){
+if(e.key==="Enter"){renameExInPlan(plan.id,day.id,ex.id,editingExName)}
+else if(e.key==="Escape"){setEditingExId(null)}
+},
+onBlur:function(){if(editingExName.trim()&&editingExName.trim()!==ex.name){renameExInPlan(plan.id,day.id,ex.id,editingExName)}else{setEditingExId(null)}}
+}):
+h("div",{className:"ex-name",style:{cursor:"pointer"},onClick:function(){setEditingExId(ex.id);setEditingExName(ex.name)}},ex.name),
+!isEditingThis&&h("div",{style:{display:"flex",gap:4}},
+h("button",{style:{color:"var(--tx3)",padding:6,borderRadius:6},onClick:function(){setEditingExId(ex.id);setEditingExName(ex.name)},title:"Rename"},h(Icon,{name:"edit",size:14})),
+h("button",{style:{color:"var(--red)",padding:6,borderRadius:6},onClick:function(){
+setConfirm({title:"Remove Exercise",message:"Remove '"+ex.name+"' from "+day.name+"? Past logs are kept.",
+danger:true,onCancel:function(){setConfirm(null)},onConfirm:function(){removeExInPlan(plan.id,day.id,ex.id);setConfirm(null)}});
+},title:"Delete"},h(Icon,{name:"trash",size:14}))
+)
 ),
 sets.length>0?
-sets.map((s,si)=>
-h("div",{key:si,className:"hist-set"},
+sets.map(function(s,si){
+const isEditingW=editingHistSet&&editingHistSet.exName===ex.name&&editingHistSet.setIdx===si&&editingHistSet.field==="weight";
+const isEditingR=editingHistSet&&editingHistSet.exName===ex.name&&editingHistSet.setIdx===si&&editingHistSet.field==="reps";
+const startEdit=function(field,curVal){setEditingHistSet({exName:ex.name,setIdx:si,field:field});setEditingHistVal(curVal||"")};
+const commit=function(){
+if(editingHistSet){
+const{exName,setIdx,field}=editingHistSet;
+updateLoggedSet(plan.id,day.id,activeWeek,exName,setIdx,field,editingHistVal);
+}
+setEditingHistSet(null);setEditingHistVal("");
+};
+return h("div",{key:si,className:"hist-set",style:{gap:6}},
 h("div",{className:"set-label"},si+1),
-h("span",{className:"hist-val"},s.weight||"—"),
+isEditingW?
+h("input",{className:"set-input",style:{maxWidth:80},type:"number",inputMode:"decimal",autoFocus:true,
+value:editingHistVal,
+onChange:function(e){setEditingHistVal(e.target.value)},
+onBlur:commit,
+onKeyDown:function(e){if(e.key==="Enter")e.target.blur();if(e.key==="Escape"){setEditingHistSet(null);setEditingHistVal("")}}
+}):
+h("button",{className:"hist-val",style:{cursor:"pointer",background:"var(--bg)",border:"1px dashed var(--bg3)",borderRadius:6,padding:"4px 10px",fontFamily:"var(--mono)",minWidth:50},
+onClick:function(){startEdit("weight",s.weight)},title:"Tap to edit"},s.weight||"—"),
 h("span",{className:"hist-lbl"},unit),
-h("span",{style:{color:"var(--tx4)",margin:"0 6px"}},"×"),
-h("span",{className:"hist-val"},s.reps||"—"),
-h("span",{className:"hist-lbl"},"reps")
-)
-):
-h("div",{className:"hist-empty"},"No data logged")
+h("span",{style:{color:"var(--tx4)",margin:"0 4px"}},"×"),
+isEditingR?
+h("input",{className:"set-input",style:{maxWidth:80},type:"number",inputMode:"numeric",autoFocus:true,
+value:editingHistVal,
+onChange:function(e){setEditingHistVal(e.target.value)},
+onBlur:commit,
+onKeyDown:function(e){if(e.key==="Enter")e.target.blur();if(e.key==="Escape"){setEditingHistSet(null);setEditingHistVal("")}}
+}):
+h("button",{className:"hist-val",style:{cursor:"pointer",background:"var(--bg)",border:"1px dashed var(--bg3)",borderRadius:6,padding:"4px 10px",fontFamily:"var(--mono)",minWidth:50},
+onClick:function(){startEdit("reps",s.reps)},title:"Tap to edit"},s.reps||"—"),
+h("span",{className:"hist-lbl"},"reps"),
+h("button",{style:{color:"var(--red)",fontSize:14,marginLeft:"auto",padding:"2px 8px"},
+onClick:function(){
+setConfirm({title:"Delete Set",message:"Delete set "+(si+1)+" of "+ex.name+"?",
+danger:true,onCancel:function(){setConfirm(null)},onConfirm:function(){removeLoggedSet(plan.id,day.id,activeWeek,ex.name,si);setConfirm(null)}});
+},title:"Delete set"},"×")
 );
 }):
+h("div",{className:"hist-empty"},"No data logged"),
+// Add set button (also in history mode)
+h("button",{className:"add-set-btn",style:{marginTop:6},onClick:function(){addLoggedSet(plan.id,day.id,activeWeek,ex.name)}},"+ Add Set")
+);
+}),
+// "Add exercise" panel for history view
+h("div",{className:"ex-card",style:{borderStyle:"dashed",background:"transparent"}},
+h("div",{style:{display:"flex",gap:8}},
+h("input",{className:"field-input",style:{flex:1},value:newLogExName,placeholder:"+ Add new exercise to plan",
+onChange:function(e){setNewLogExName(e.target.value)},
+onKeyDown:function(e){if(e.key==="Enter"&&newLogExName.trim()){addExInPlan(plan.id,day.id,newLogExName);setNewLogExName("")}}
+}),
+h("button",{className:"btn btn-sm btn-primary",style:{width:"auto",flexShrink:0},onClick:function(){
+if(newLogExName.trim()){addExInPlan(plan.id,day.id,newLogExName);setNewLogExName("")}
+}},"Add")
+)
+)
+):
 
 // LOG VIEW (editable)
 h("div",null,
 day.exercises.map((ex,i)=>{
 const prev=getPrevData(plan.id,day.id,ex.name);
 const sets=(logData[ex.id]?.sets)||[{weight:"",reps:""}];
+const isEditingThis=editingExId===ex.id;
 return h("div",{key:ex.id,className:"ex-card"},
 h("div",{className:"ex-header"},
 h("div",{className:"ex-number"},String(i+1).padStart(2,"0")),
-h("div",{className:"ex-name"},ex.name),
-prev!==null&&h("div",{className:"ex-prev"},"prev "+prev+unit)
+isEditingThis?
+h("input",{className:"field-input",style:{flex:1,fontSize:14,padding:"6px 10px"},
+value:editingExName,autoFocus:true,
+onChange:function(e){setEditingExName(e.target.value)},
+onKeyDown:function(e){
+if(e.key==="Enter"){renameExInPlan(plan.id,day.id,ex.id,editingExName)}
+else if(e.key==="Escape"){setEditingExId(null)}
+},
+onBlur:function(){if(editingExName.trim()&&editingExName.trim()!==ex.name){renameExInPlan(plan.id,day.id,ex.id,editingExName)}else{setEditingExId(null)}}
+}):
+h("div",{className:"ex-name",style:{cursor:"pointer"},onClick:function(){setEditingExId(ex.id);setEditingExName(ex.name)}},ex.name),
+!isEditingThis&&prev!==null&&h("div",{className:"ex-prev"},"prev "+prev+unit),
+!isEditingThis&&h("div",{style:{display:"flex",gap:4,marginLeft:6}},
+h("button",{style:{color:"var(--tx3)",padding:6,borderRadius:6},onClick:function(){setEditingExId(ex.id);setEditingExName(ex.name)},title:"Rename"},h(Icon,{name:"edit",size:14})),
+h("button",{style:{color:"var(--red)",padding:6,borderRadius:6},onClick:function(){
+setConfirm({title:"Remove Exercise",message:"Remove '"+ex.name+"' from "+day.name+"? Past logs are kept.",
+danger:true,onCancel:function(){setConfirm(null)},onConfirm:function(){removeExInPlan(plan.id,day.id,ex.id);setConfirm(null)}});
+},title:"Delete"},h(Icon,{name:"trash",size:14}))
+)
 ),
 h("div",{className:"set-row",style:{marginBottom:4}},
 h("div",{className:"set-label"},"SET"),
@@ -1217,6 +1467,18 @@ onClick:function(){removeSet(ex.id,si)}},"×"):h("div",{style:{width:28}})
 h("button",{className:"add-set-btn",onClick:function(){addSet(ex.id)}},"+ Add Set")
 );
 }),
+// Add new exercise mid-workout
+h("div",{className:"ex-card",style:{borderStyle:"dashed",background:"transparent"}},
+h("div",{style:{display:"flex",gap:8}},
+h("input",{className:"field-input",style:{flex:1},value:newLogExName,placeholder:"+ Add new exercise to plan",
+onChange:function(e){setNewLogExName(e.target.value)},
+onKeyDown:function(e){if(e.key==="Enter"&&newLogExName.trim()){addExInPlan(plan.id,day.id,newLogExName);setNewLogExName("")}}
+}),
+h("button",{className:"btn btn-sm btn-primary",style:{width:"auto",flexShrink:0},onClick:function(){
+if(newLogExName.trim()){addExInPlan(plan.id,day.id,newLogExName);setNewLogExName("")}
+}},"Add")
+)
+),
 
 h("div",{style:{padding:"8px 16px 16px"}},
 h("button",{className:"btn btn-success",style:{fontSize:16,padding:16,letterSpacing:1},onClick:completeWorkout},
@@ -1230,10 +1492,13 @@ confirm&&h(ConfirmDialog,confirm)
 }
 
 /* ─── ANALYTICS PAGE ─── */
-function AnalyticsPage({plans,logs,bodyweight,prs,settings,addBodyweight,flash}){
+function AnalyticsPage({plans,logs,bodyweight,prs,settings,addBodyweight,editBodyweight,deleteBodyweight,flash}){
 const[tab,setTab]=S("overview");
 const[selExercise,setSelExercise]=S(null);
 const[bwInput,setBwInput]=S("");
+const[editingBwIdx,setEditingBwIdx]=S(null);
+const[editingBwVal,setEditingBwVal]=S("");
+const[bwConfirm,setBwConfirm]=S(null);
 const chartRef=R(null);
 const bwChartRef=R(null);
 const volChartRef=R(null);
@@ -1566,13 +1831,46 @@ h("canvas",{ref:bwChartRef,className:"chart-canvas",height:200})
 ),
 h("div",{className:"section-title"},"History"),
 h("div",{style:{padding:"0 16px"}},
-[...bodyweight].reverse().slice(0,20).map((bw,i)=>
-h("div",{key:i,style:{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:"1px solid var(--bg3)",fontSize:14}},
-h("span",{style:{color:"var(--tx3)"}},formatDate(bw.date)),
-h("span",{style:{fontFamily:"var(--mono)",fontWeight:600}},bw.value+" "+unit)
+[...bodyweight].map(function(bw,origIdx){return{bw:bw,origIdx:origIdx}}).reverse().slice(0,20).map(function(item){
+const bw=item.bw;const origIdx=item.origIdx;const i=origIdx;
+const isEditing=editingBwIdx===origIdx;
+return h("div",{key:i,style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:"1px solid var(--bg3)",fontSize:14,gap:8}},
+h("span",{style:{color:"var(--tx3)",flexShrink:0}},formatDate(bw.date)),
+isEditing?
+h("div",{style:{display:"flex",gap:6,alignItems:"center",flex:1,justifyContent:"flex-end"}},
+h("input",{className:"set-input",style:{maxWidth:90,height:32},type:"number",inputMode:"decimal",
+value:editingBwVal,autoFocus:true,
+onChange:function(e){setEditingBwVal(e.target.value)},
+onKeyDown:function(e){
+if(e.key==="Enter"){
+const v=parseFloat(editingBwVal);
+if(!isNaN(v)){editBodyweight(origIdx,v);setEditingBwIdx(null);flash("Updated!")}
+else{flash("Invalid weight","error")}
+}
+if(e.key==="Escape"){setEditingBwIdx(null)}
+}
+}),
+h("span",{style:{fontSize:12,color:"var(--tx3)"}},unit),
+h("button",{style:{color:"var(--green)",padding:4,fontSize:16},onClick:function(){
+const v=parseFloat(editingBwVal);
+if(!isNaN(v)){editBodyweight(origIdx,v);setEditingBwIdx(null);flash("Updated!")}
+else{flash("Invalid weight","error")}
+}},"✓"),
+h("button",{style:{color:"var(--tx3)",padding:4,fontSize:16},onClick:function(){setEditingBwIdx(null)}},"×")
+):
+h("div",{style:{display:"flex",gap:8,alignItems:"center"}},
+h("span",{style:{fontFamily:"var(--mono)",fontWeight:600,cursor:"pointer"},
+onClick:function(){setEditingBwIdx(origIdx);setEditingBwVal(String(bw.value))}},bw.value+" "+unit),
+h("button",{style:{color:"var(--tx3)",padding:4,borderRadius:6},onClick:function(){setEditingBwIdx(origIdx);setEditingBwVal(String(bw.value))},title:"Edit"},h(Icon,{name:"edit",size:13})),
+h("button",{style:{color:"var(--red)",padding:4,borderRadius:6},onClick:function(){
+setBwConfirm({title:"Delete Entry",message:"Delete the "+bw.value+" "+unit+" entry from "+formatDate(bw.date)+"?",
+danger:true,onCancel:function(){setBwConfirm(null)},onConfirm:function(){deleteBodyweight(origIdx);setBwConfirm(null);flash("Deleted")}});
+},title:"Delete"},h(Icon,{name:"trash",size:13}))
 )
-)
-)
+);
+})
+),
+bwConfirm&&h(ConfirmDialog,bwConfirm)
 )
 )
 );
