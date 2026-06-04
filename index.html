@@ -643,14 +643,16 @@ h("span",null,label)
 function HomePage({user,plans,logs,bodyweight,streak,totalWorkouts,prs,flash,setPage,addBodyweight,settings}){
 const[showBW,setShowBW]=S(false);
 const[bwVal,setBwVal]=S("");
+const now=new Date();
+const[calViewMonth,setCalViewMonth]=S(now.getMonth());
+const[calViewYear,setCalViewYear]=S(now.getFullYear());
+const[selectedDayLogs,setSelectedDayLogs]=S(null);
 const unit=settings.unit||"kg";
 
 const logDates=Object.values(logs).map(l=>new Date(l.completedAt));
-const now=new Date();
-const calMonth=now.getMonth();const calYear=now.getFullYear();
-const firstDay=new Date(calYear,calMonth,1).getDay();
-const daysInMonth=new Date(calYear,calMonth+1,0).getDate();
-const workoutDays=new Set(logDates.filter(d=>d.getMonth()===calMonth&&d.getFullYear()===calYear).map(d=>d.getDate()));
+const firstDay=new Date(calViewYear,calViewMonth,1).getDay();
+const daysInMonth=new Date(calViewYear,calViewMonth+1,0).getDate();
+const workoutDays=new Set(logDates.filter(d=>d.getMonth()===calViewMonth&&d.getFullYear()===calViewYear).map(d=>d.getDate()));
 
 const lastBW=bodyweight.length?bodyweight[bodyweight.length-1]:null;
 const prevBW=bodyweight.length>1?bodyweight[bodyweight.length-2]:null;
@@ -718,14 +720,63 @@ h("span",{style:{fontSize:12,color:"var(--tx3)"}},unit)
 ),
 
 // Calendar
-h("div",{className:"section-title"},new Date().toLocaleDateString("en-US",{month:"long",year:"numeric"})),
+h("div",{style:{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px 4px"}},
+h("button",{className:"icon-btn",onClick:function(){if(calViewMonth===0){setCalViewMonth(11);setCalViewYear(calViewYear-1)}else{setCalViewMonth(calViewMonth-1)}}},
+h("div",{style:{fontSize:18,fontWeight:700,lineHeight:1}},"‹")),
+h("div",{style:{fontSize:14,fontWeight:700}},new Date(calViewYear,calViewMonth,1).toLocaleDateString("en-US",{month:"long",year:"numeric"})),
+h("button",{className:"icon-btn",onClick:function(){if(calViewMonth===11){setCalViewMonth(0);setCalViewYear(calViewYear+1)}else{setCalViewMonth(calViewMonth+1)}}},
+h("div",{style:{fontSize:18,fontWeight:700,lineHeight:1}},"›"))
+),
 h("div",{className:"cal-grid"},
 ["S","M","T","W","T","F","S"].map((d,i)=>h("div",{key:i,className:"cal-head"},d)),
 Array(firstDay).fill(null).map((_,i)=>h("div",{key:"e"+i})),
 Array(daysInMonth).fill(null).map((_,i)=>{
-const day=i+1;const isToday=day===now.getDate();
-return h("div",{key:day,className:"cal-day"+(workoutDays.has(day)?" has-workout":"")+(isToday?" today":"")},day);
+const day=i+1;
+const isToday=calViewYear===now.getFullYear()&&calViewMonth===now.getMonth()&&day===now.getDate();
+const hasWorkout=workoutDays.has(day);
+return h("div",{key:day,
+className:"cal-day"+(hasWorkout?" has-workout":"")+(isToday?" today":""),
+style:hasWorkout?{cursor:"pointer",boxShadow:"0 0 0 2px rgba(255,255,255,0.2)"}:{},
+onClick:hasWorkout?function(){
+const dayLogs=Object.values(logs).filter(function(l){const d=new Date(l.completedAt);return d.getFullYear()===calViewYear&&d.getMonth()===calViewMonth&&d.getDate()===day});
+setSelectedDayLogs({date:new Date(calViewYear,calViewMonth,day),logs:dayLogs});
+}:null},day);
 })
+),
+
+// Day log modal (calendar click)
+selectedDayLogs&&h("div",{className:"modal-overlay",onClick:function(){setSelectedDayLogs(null)}},
+h("div",{className:"modal",onClick:function(e){e.stopPropagation()}},
+h("div",{className:"modal-title"},
+selectedDayLogs.date.toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"}),
+h("button",{className:"modal-close",onClick:function(){setSelectedDayLogs(null)}},"×")
+),
+selectedDayLogs.logs.length===0?h("div",{className:"hist-empty"},"No workouts logged"):
+selectedDayLogs.logs.map(function(log,li){
+const plan=plans.find(function(p){return p.id===log.planId});
+const day=plan&&plan.days.find(function(d){return d.id===log.dayId});
+return h("div",{key:li,style:{marginBottom:16}},
+h("div",{style:{fontSize:13,fontWeight:700,color:(day&&day.color)||"var(--blue)",marginBottom:8,padding:"4px 0",borderBottom:"1px solid var(--bg3)"}},
+(plan&&plan.name)||"Unknown Plan"," — ",(day&&day.name)||"Unknown Day"
+),
+log.exercises&&Object.entries(log.exercises).map(function(entry){
+const exName=entry[0];const data=entry[1];
+const sets=data.sets||[];
+return h("div",{key:exName,style:{marginBottom:8,padding:"8px 10px",background:"var(--bg)",borderRadius:8}},
+h("div",{style:{fontSize:13,fontWeight:600,marginBottom:4,display:"flex",alignItems:"center",gap:6}},
+exName,
+data.temporary&&h("span",{style:{fontSize:10,background:"var(--orange)",color:"#fff",borderRadius:4,padding:"1px 5px",fontWeight:700}},"TEMP")
+),
+sets.map(function(s,si){
+return h("div",{key:si,style:{fontSize:12,color:"var(--tx3)",fontFamily:"var(--mono)"}},
+"Set "+(si+1)+": "+(s.weight||"—")+" "+unit+" × "+(s.reps||"—")+" reps"
+);
+})
+);
+})
+);
+})
+)
 ),
 
 // Body weight modal
@@ -782,6 +833,10 @@ const[editingExName,setEditingExName]=S("");
 const[newLogExName,setNewLogExName]=S(""); // input for adding exercise mid-workout
 const[editingHistSet,setEditingHistSet]=S(null); // {exName,setIdx,field}
 const[editingHistVal,setEditingHistVal]=S("");
+// Temporary exercises (this session only, not saved to plan)
+const[tempExercises,setTempExercises]=S([]);
+const[tempLogData,setTempLogData]=S({});
+const[newTempExName,setNewTempExName]=S("");
 
 const startEditPlan=(plan)=>{
 if(plan){
@@ -925,6 +980,30 @@ setLogData(prev=>{const c={...prev};delete c[exId];return c});
 flash("Exercise removed");
 };
 
+// Temporary exercise helpers (not added to plan)
+const addTempEx=(name)=>{
+const trimmed=(name||"").trim();
+if(!trimmed){flash("Enter a name","error");return}
+const id=uid();
+setTempExercises(prev=>[...prev,{id,name:trimmed}]);
+setTempLogData(prev=>({...prev,[id]:{sets:[{weight:"",reps:""}]}}));
+setNewTempExName("");
+flash("Temporary exercise added");
+};
+const updateTempSet=(exId,setIdx,field,val)=>{
+setTempLogData(prev=>{const nl={...prev};if(!nl[exId])nl[exId]={sets:[{weight:"",reps:""}]};nl[exId]={...nl[exId],sets:nl[exId].sets.map((s,i)=>i===setIdx?{...s,[field]:val}:s)};return nl});
+};
+const addTempSet=(exId)=>{
+setTempLogData(prev=>{const nl={...prev};if(!nl[exId])nl[exId]={sets:[]};const last=nl[exId].sets[nl[exId].sets.length-1]||{weight:"",reps:""};return{...nl,[exId]:{sets:[...nl[exId].sets,{weight:last.weight,reps:last.reps}]}}});
+};
+const removeTempSet=(exId,setIdx)=>{
+setTempLogData(prev=>{const nl={...prev};const sets=nl[exId].sets.filter((_,i)=>i!==setIdx);return{...nl,[exId]:{sets:sets.length?sets:[{weight:"",reps:""}]}}});
+};
+const removeTempEx=(exId)=>{
+setTempExercises(prev=>prev.filter(e=>e.id!==exId));
+setTempLogData(prev=>{const nl={...prev};delete nl[exId];return nl});
+};
+
 // Update a single set inside an already-logged workout (history inline edit)
 const updateLoggedSet=(planId,dayId,weekNum,exName,setIdx,field,val)=>{
 const key=planId+"_"+dayId+"_"+weekNum;
@@ -990,7 +1069,7 @@ ld[ex.id]={sets:data.sets.map(s=>({weight:s.weight||"",reps:s.reps||""}))};
 });
 }
 }
-setLogData(ld);setLogMode("log");setView("log");
+setLogData(ld);setTempExercises([]);setTempLogData({});setNewTempExName("");setLogMode("log");setView("log");
 };
 
 // View an already-logged workout — jump to the most recent logged week in history mode
@@ -1044,15 +1123,25 @@ if(nl[exId].sets.length===0)nl[exId].sets=[{weight:"",reps:""}];
 setLogData(nl);
 };
 
-const completeWorkout=()=>{
+const buildExData=()=>{
 const day=activePlan.days[activeDay];
 const exData={};
 day.exercises.forEach(ex=>{
-if(logData[ex.id]){
-exData[ex.name]={sets:logData[ex.id].sets.filter(s=>s.weight||s.reps)};
-}
+if(logData[ex.id]){exData[ex.name]={sets:logData[ex.id].sets.filter(s=>s.weight||s.reps)}}
 });
-addLog(activePlan.id,day.id,activeWeek,exData);
+tempExercises.forEach(ex=>{
+if(tempLogData[ex.id]){exData[ex.name]={sets:tempLogData[ex.id].sets.filter(s=>s.weight||s.reps),temporary:true}}
+});
+return exData;
+};
+const saveProgress=()=>{
+const day=activePlan.days[activeDay];
+addLog(activePlan.id,day.id,activeWeek,buildExData());
+flash("Progress saved!");
+};
+const completeWorkout=()=>{
+const day=activePlan.days[activeDay];
+addLog(activePlan.id,day.id,activeWeek,buildExData());
 flash("Workout complete! Great job!");
 setView("plans");
 };
@@ -1467,22 +1556,68 @@ onClick:function(){removeSet(ex.id,si)}},"×"):h("div",{style:{width:28}})
 h("button",{className:"add-set-btn",onClick:function(){addSet(ex.id)}},"+ Add Set")
 );
 }),
-// Add new exercise mid-workout
+// Temporary exercises (this session only)
+tempExercises.map(function(ex,i){
+const sets=(tempLogData[ex.id]?.sets)||[{weight:"",reps:""}];
+return h("div",{key:ex.id,className:"ex-card",style:{borderColor:"var(--orange)",borderWidth:2}},
+h("div",{className:"ex-header"},
+h("div",{className:"ex-number",style:{background:"var(--orange)",color:"#fff"}},"T"),
+h("div",{className:"ex-name"},ex.name),
+h("div",{style:{display:"flex",alignItems:"center",gap:4}},
+h("span",{style:{fontSize:10,background:"var(--orange)",color:"#fff",borderRadius:4,padding:"2px 6px",fontWeight:700,whiteSpace:"nowrap"}},"TODAY ONLY"),
+h("button",{style:{color:"var(--red)",padding:6,borderRadius:6},onClick:function(){removeTempEx(ex.id)},title:"Remove"},h(Icon,{name:"trash",size:14}))
+)
+),
+h("div",{className:"set-row",style:{marginBottom:4}},
+h("div",{className:"set-label"},"SET"),
+h("div",{style:{flex:1,minWidth:0}},h("div",{className:"set-input-label"},unit.toUpperCase())),
+h("div",{style:{flex:1,minWidth:0}},h("div",{className:"set-input-label"},"REPS")),
+h("div",{style:{width:28}})
+),
+sets.map(function(s,si){
+return h("div",{key:si,className:"set-row"},
+h("div",{className:"set-label"},si+1),
+h("input",{className:"set-input",type:"number",inputMode:"decimal",value:s.weight,placeholder:"—",
+onChange:function(e){updateTempSet(ex.id,si,"weight",e.target.value)}}),
+h("input",{className:"set-input",type:"number",inputMode:"numeric",value:s.reps,placeholder:"—",
+onChange:function(e){updateTempSet(ex.id,si,"reps",e.target.value)}}),
+sets.length>1?h("button",{style:{color:"var(--red)",fontSize:14,width:28,textAlign:"center"},
+onClick:function(){removeTempSet(ex.id,si)}},"×"):h("div",{style:{width:28}})
+);
+}),
+h("button",{className:"add-set-btn",onClick:function(){addTempSet(ex.id)}},"+ Add Set")
+);
+}),
+
+// Add exercise options
 h("div",{className:"ex-card",style:{borderStyle:"dashed",background:"transparent"}},
-h("div",{style:{display:"flex",gap:8}},
-h("input",{className:"field-input",style:{flex:1},value:newLogExName,placeholder:"+ Add new exercise to plan",
+h("div",{style:{fontSize:11,color:"var(--tx3)",fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:8}},"Add Exercise"),
+h("div",{style:{display:"flex",gap:8,marginBottom:8}},
+h("input",{className:"field-input",style:{flex:1},value:newLogExName,placeholder:"Exercise name",
 onChange:function(e){setNewLogExName(e.target.value)},
 onKeyDown:function(e){if(e.key==="Enter"&&newLogExName.trim()){addExInPlan(plan.id,day.id,newLogExName);setNewLogExName("")}}
 }),
 h("button",{className:"btn btn-sm btn-primary",style:{width:"auto",flexShrink:0},onClick:function(){
 if(newLogExName.trim()){addExInPlan(plan.id,day.id,newLogExName);setNewLogExName("")}
-}},"Add")
+}},"+ Plan")
+),
+h("div",{style:{display:"flex",gap:8}},
+h("input",{className:"field-input",style:{flex:1},value:newTempExName,placeholder:"Exercise name (today only)",
+onChange:function(e){setNewTempExName(e.target.value)},
+onKeyDown:function(e){if(e.key==="Enter"&&newTempExName.trim()){addTempEx(newTempExName)}}
+}),
+h("button",{className:"btn btn-sm",style:{width:"auto",flexShrink:0,background:"var(--orange)",color:"#fff"},
+onClick:function(){if(newTempExName.trim())addTempEx(newTempExName)}},"+ Today")
 )
 ),
 
-h("div",{style:{padding:"8px 16px 16px"}},
+h("div",{style:{padding:"8px 16px 4px"}},
 h("button",{className:"btn btn-success",style:{fontSize:16,padding:16,letterSpacing:1},onClick:completeWorkout},
 isHistoryWeek?"✓ UPDATE WORKOUT":"✓ COMPLETE WORKOUT")
+),
+h("div",{style:{padding:"0 16px 16px"}},
+h("button",{className:"btn btn-ghost",style:{fontSize:14,color:"var(--tx2)"},onClick:saveProgress},
+h(Icon,{name:"save",size:16})," Save Progress")
 )
 ),
 
