@@ -658,7 +658,7 @@ const lastBW=bodyweight.length?bodyweight[bodyweight.length-1]:null;
 const prevBW=bodyweight.length>1?bodyweight[bodyweight.length-2]:null;
 const bwChange=lastBW&&prevBW?(lastBW.value-prevBW.value).toFixed(1):null;
 
-const thisMonthCount=Object.values(logs).filter(l=>{const d=new Date(l.completedAt);return d.getMonth()===calMonth&&d.getFullYear()===calYear}).length;
+const thisMonthCount=Object.values(logs).filter(l=>{const d=new Date(l.completedAt);return d.getMonth()===now.getMonth()&&d.getFullYear()===now.getFullYear()}).length;
 
 return h("div",null,
 h("div",{className:"page-header"},
